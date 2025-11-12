@@ -182,12 +182,12 @@
         <div class="tools">
             <button class="tool-card" onclick="location.href='sender.html'">
                 <h2>📤 发送端</h2>
-                <p>将文本数据转换为二维码，支持自动分片和多种显示模式。适用于需要传输数据的设备。</p>
+                <p>将文本或文件转换为二维码。支持<strong>通用模式</strong>(兼容微信/支付宝扫描)、<strong>私有模式</strong>(长文本分片传输)和<strong>文件传输</strong>(支持任意文件类型)。</p>
             </button>
-            
+
             <button class="tool-card receiver" onclick="location.href='receiver.html'">
                 <h2>📥 接收端</h2>
-                <p>通过摄像头扫描二维码接收数据，支持自动合并多片数据。适用于手机等移动设备。</p>
+                <p>通过摄像头扫描二维码接收数据。支持文本、文件自动识别，智能合并多片数据，文件完整性校验。适用于手机等移动设备。</p>
             </button>
         </div>
         
@@ -196,7 +196,9 @@
             <div class="feature-list">
                 <div class="feature-item">完全离线运行，无需网络连接</div>
                 <div class="feature-item">所有代码内嵌，单文件即可使用</div>
-                <div class="feature-item">支持超长文本自动分片传输</div>
+                <div class="feature-item"><strong>通用模式</strong>: 兼容微信、支付宝、Apple相机等第三方扫描器</div>
+                <div class="feature-item"><strong>私有模式</strong>: 支持超长文本自动分片传输</div>
+                <div class="feature-item"><strong>文件传输</strong>: 支持任意文件类型，自动分片、校验和验证</div>
                 <div class="feature-item">平铺/循环两种显示模式</div>
                 <div class="feature-item">智能纠错，确保数据完整性</div>
                 <div class="feature-item">跨平台兼容，支持各种设备</div>

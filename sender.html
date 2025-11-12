@@ -29,6 +29,21 @@ textarea { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8p
 .mode-selector { display: flex; gap: 10px; margin-bottom: 20px; }
 .mode-btn { flex: 1; padding: 12px; background: white; border: 2px solid #ddd; border-radius: 6px; cursor: pointer; }
 .mode-btn.active { background: #4CAF50; color: white; border-color: #4CAF50; }
+/* Mode Selection Styles (T009) */
+.mode-selection { padding: 15px; background: #f8f9fa; border-radius: 8px; border: 2px solid #e9ecef; }
+.mode-selection label { padding: 10px; border: 2px solid #ddd; border-radius: 6px; background: white; transition: all 0.3s; }
+.mode-selection label:hover { border-color: #4CAF50; background: #f0fff4; }
+.mode-selection input[type="radio"] { accent-color: #4CAF50; }
+.mode-selection input[type="radio"]:checked + span { color: #2c6e49; }
+.error-level-selection { padding: 12px; background: #fff8e1; border-radius: 6px; border: 1px solid #ffc107; }
+/* File Upload Styles (T030) */
+.drop-zone { border: 2px dashed #ddd; border-radius: 8px; padding: 40px 20px; text-align: center; background: #fafafa; cursor: pointer; transition: all 0.3s ease; }
+.drop-zone:hover { border-color: #4CAF50; background: #f0fff4; }
+.drop-zone.drag-over { border-color: #4CAF50; background: #e8f5e9; transform: scale(1.02); }
+.file-info { margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 2px solid #e9ecef; }
+.file-info h3 { margin: 0 0 15px 0; color: #2c3e50; font-size: 16px; }
+.estimate { font-size: 14px; line-height: 1.6; }
+.estimate strong { color: #856404; }
 </style>
 </head>
 <body>
@@ -42,6 +57,40 @@ textarea { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8p
     <div class="section">
         <h2>数据输入</h2>
         <textarea id="textInput" placeholder="输入要传输的文本...">Hello World! 这是完全离线的QR码传输系统。支持中文字符和长文本智能分片。</textarea>
+
+        <!-- Mode Selection UI (T007) -->
+        <div class="mode-selection" style="margin-top: 15px;">
+            <h3 style="font-size: 16px; margin-bottom: 10px;">二维码模式</h3>
+            <div style="display: flex; gap: 15px;">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="radio" name="qrMode" value="universal" onchange="handleModeChange()">
+                    <span style="margin-left: 6px;">
+                        <strong>通用模式</strong>
+                        <small style="display: block; color: #666;">兼容微信、支付宝等第三方扫描器</small>
+                    </span>
+                </label>
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="radio" name="qrMode" value="private" checked onchange="handleModeChange()">
+                    <span style="margin-left: 6px;">
+                        <strong>私有模式</strong>
+                        <small style="display: block; color: #666;">支持长文本分片传输和循环播放</small>
+                    </span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Error Level Selector for Universal Mode (T008) -->
+        <div id="error-level-container" class="error-level-selection" style="margin-top: 12px; display: none;">
+            <label style="display: block; margin-bottom: 5px; font-weight: 500;">纠错级别 (影响数据容量)</label>
+            <select id="universalErrorLevel" onchange="handleErrorLevelChange()" style="width: 100%; padding: 8px; border: 2px solid #ddd; border-radius: 6px;">
+                <option value="L">L - 低 (7%纠错，容量~2953字节)</option>
+                <option value="M">M - 中 (15%纠错，容量~2331字节)</option>
+                <option value="Q">Q - 较高 (25%纠错，容量~1663字节)</option>
+                <option value="H">H - 高 (30%纠错，容量~1273字节)</option>
+            </select>
+            <span id="capacityHint" style="display: block; margin-top: 5px; font-size: 12px; color: #666;">当前容量上限: ~2953 字节</span>
+        </div>
+
         <div class="options-panel">
             <div class="option-group">
                 <label>纠错级别</label>
@@ -76,9 +125,44 @@ textarea { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8p
                 </select>
             </div>
         </div>
-        <button class="btn" onclick="generateQR()" style="margin-top: 15px;">生成二维码</button>
+
+        <!-- File Upload Area (T028) - Initially hidden, shown only in private mode -->
+        <div id="file-upload-area" style="display: none; margin-top: 20px;">
+            <h3 style="font-size: 16px; margin-bottom: 10px;">📁 文件上传</h3>
+            <div class="drop-zone" id="dropZone">
+                <p style="font-size: 18px; margin-bottom: 10px;">📤 拖拽文件到这里</p>
+                <p style="color: #666; margin-bottom: 15px;">或</p>
+                <button class="btn" onclick="document.getElementById('fileInput').click()" type="button">选择文件</button>
+                <input type="file" id="fileInput" style="display: none;" onchange="handleFileInputChange(event)">
+            </div>
+
+            <!-- File Info Display (T029) -->
+            <div id="file-info-display" class="file-info" style="display: none;">
+                <h3>📄 文件信息</h3>
+                <div style="margin-top: 10px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="color: #666;">文件名:</span>
+                        <span id="fileName" style="font-weight: bold;"></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="color: #666;">文件大小:</span>
+                        <span id="fileSize" style="font-weight: bold;"></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="color: #666;">文件类型:</span>
+                        <span id="fileType" style="font-weight: bold;"></span>
+                    </div>
+                    <div id="qrEstimate" class="estimate" style="margin-top: 15px; padding: 12px; background: #fff3cd; border-radius: 6px; border: 1px solid #ffc107;">
+                        <strong>预计二维码数量:</strong> <span id="estimatedQRCount">0</span> 个<br>
+                        <strong>预计扫描时间:</strong> <span id="estimatedScanTime">0</span> 分钟
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn" onclick="generateQR()" style="margin-top: 15px;" id="generateBtn">生成二维码</button>
     </div>
-    
+
     <div class="section">
         <h2>显示模式</h2>
         <div class="mode-selector">
@@ -142,10 +226,568 @@ let currentIndex = 0;
 let loopInterval = null;
 let loopSpeed = 2000;
 
+// ===== 基础工具函数 (Foundational Utilities) =====
+
+// Mode Selection Utilities (T004)
+function getSelectedMode() {
+    const radioButtons = document.getElementsByName('qrMode');
+    for (let radio of radioButtons) {
+        if (radio.checked) {
+            return radio.value;
+        }
+    }
+    return 'private'; // 默认私有模式
+}
+
+function isModeUniversal() {
+    return getSelectedMode() === 'universal';
+}
+
+function isModePrivate() {
+    return getSelectedMode() === 'private';
+}
+
+// Text Encoding Utilities (T005)
+function encodeForUniversalQR(text) {
+    // 检查是否包含非ASCII字符（中文、emoji等）或特殊字符
+    const hasNonASCII = /[^\x00-\x7F]/.test(text);
+    const problematicChars = /[<>&"']/.test(text);
+
+    if (hasNonASCII || problematicChars) {
+        // 应用percent-encoding以避免UTF-8编码问题
+        const encoded = encodeURIComponent(text);
+        let warningMsg = '';
+
+        if (hasNonASCII && problematicChars) {
+            warningMsg = '文本包含中文/特殊字符，已自动编码。扫描后可能显示为编码格式，建议使用私有模式传输中文。';
+        } else if (hasNonASCII) {
+            warningMsg = '文本包含中文字符，已自动编码。扫描后可能显示为编码格式（如 %E4%B8%AD），建议使用私有模式传输中文。';
+        } else {
+            warningMsg = '部分特殊字符已编码，可能在某些扫描器显示略有差异。';
+        }
+
+        return {
+            encoded: encoded,
+            needsWarning: true,
+            warningMessage: warningMsg,
+            original: text
+        };
+    }
+    return {
+        encoded: text,
+        needsWarning: false,
+        warningMessage: '',
+        original: text
+    };
+}
+
+function validateTextLength(text, errorLevel) {
+    // QR码容量限制 (Version 40各级别的最大字节数)
+    const capacityMap = {
+        'L': 2953,  // 7% 纠错
+        'M': 2331,  // 15% 纠错
+        'Q': 1663,  // 25% 纠错
+        'H': 1273   // 30% 纠错
+    };
+
+    const maxCapacity = capacityMap[errorLevel] || capacityMap['L'];
+    const utf8Bytes = new TextEncoder().encode(text).length;
+
+    return {
+        valid: utf8Bytes <= maxCapacity,
+        byteLength: utf8Bytes,
+        maxCapacity: maxCapacity,
+        errorLevel: errorLevel
+    };
+}
+
+// Warning/Error Display Utilities (T006)
+function showWarning(message) {
+    const messageDiv = document.getElementById('messageArea');
+    if (!messageDiv) {
+        // 如果messageArea不存在,创建一个
+        const newMessageDiv = document.createElement('div');
+        newMessageDiv.id = 'messageArea';
+        newMessageDiv.style.cssText = 'margin-top: 10px; padding: 12px; border-radius: 6px; background-color: #fff3cd; border: 1px solid #ffc107; color: #856404;';
+        const section = document.querySelector('.section');
+        section.appendChild(newMessageDiv);
+        newMessageDiv.textContent = '⚠️ ' + message;
+    } else {
+        messageDiv.style.cssText = 'margin-top: 10px; padding: 12px; border-radius: 6px; background-color: #fff3cd; border: 1px solid #ffc107; color: #856404; display: block;';
+        messageDiv.textContent = '⚠️ ' + message;
+    }
+}
+
+function showError(message) {
+    const messageDiv = document.getElementById('messageArea');
+    if (!messageDiv) {
+        const newMessageDiv = document.createElement('div');
+        newMessageDiv.id = 'messageArea';
+        newMessageDiv.style.cssText = 'margin-top: 10px; padding: 12px; border-radius: 6px; background-color: #f8d7da; border: 1px solid #dc3545; color: #721c24;';
+        const section = document.querySelector('.section');
+        section.appendChild(newMessageDiv);
+        newMessageDiv.textContent = '❌ ' + message;
+    } else {
+        messageDiv.style.cssText = 'margin-top: 10px; padding: 12px; border-radius: 6px; background-color: #f8d7da; border: 1px solid #dc3545; color: #721c24; display: block;';
+        messageDiv.textContent = '❌ ' + message;
+    }
+}
+
+function clearMessages() {
+    const messageDiv = document.getElementById('messageArea');
+    if (messageDiv) {
+        messageDiv.style.display = 'none';
+        messageDiv.textContent = '';
+    }
+}
+
+// ===== Mode Selection Event Handlers (T010, T011) =====
+
+// Mode Selection Change Handler (T010, T031)
+function handleModeChange() {
+    const mode = getSelectedMode();
+    const errorLevelContainer = document.getElementById('error-level-container');
+    const loopingControls = document.getElementById('loopControls');
+    const fileUploadArea = document.getElementById('file-upload-area'); // T031
+    const chunkStrategyGroup = document.querySelectorAll('.option-group')[1]; // 分片策略是第二个option-group
+    const loopSpeedGroup = document.querySelectorAll('.option-group')[2]; // 循环速度是第三个option-group
+
+    if (mode === 'universal') {
+        // 通用模式: 显示纠错级别选择器，隐藏分片策略、循环速度和文件上传
+        errorLevelContainer.style.display = 'block';
+        if (chunkStrategyGroup) chunkStrategyGroup.style.display = 'none';
+        if (loopSpeedGroup) loopSpeedGroup.style.display = 'none';
+        if (loopingControls) loopingControls.style.display = 'none';
+        if (fileUploadArea) fileUploadArea.style.display = 'none'; // T031
+
+        // 通用模式不支持文件，恢复按钮文本
+        const generateBtn = document.getElementById('generateBtn');
+        if (generateBtn) {
+            generateBtn.innerHTML = '生成二维码';
+            generateBtn.style.background = '';
+        }
+    } else {
+        // 私有模式: 隐藏纠错级别选择器，显示分片策略、循环速度和文件上传
+        errorLevelContainer.style.display = 'none';
+        if (chunkStrategyGroup) chunkStrategyGroup.style.display = 'block';
+        if (loopSpeedGroup) loopSpeedGroup.style.display = 'block';
+        if (fileUploadArea) fileUploadArea.style.display = 'block'; // T031
+        // loopingControls 会在loop模式被选中时显示
+
+        // 私有模式：根据是否有文件更新按钮文本
+        const generateBtn = document.getElementById('generateBtn');
+        if (generateBtn) {
+            if (currentFile) {
+                generateBtn.innerHTML = '📁 生成文件二维码';
+                generateBtn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+            } else {
+                generateBtn.innerHTML = '生成二维码';
+                generateBtn.style.background = '';
+            }
+        }
+    }
+
+    // 清除之前的消息
+    clearMessages();
+}
+
+// Error Level Change Handler (T011)
+function handleErrorLevelChange() {
+    const errorLevel = document.getElementById('universalErrorLevel').value;
+    const capacityHint = document.getElementById('capacityHint');
+
+    const capacityMap = {
+        'L': 2953,
+        'M': 2331,
+        'Q': 1663,
+        'H': 1273
+    };
+
+    const capacity = capacityMap[errorLevel];
+    capacityHint.textContent = `当前容量上限: ~${capacity} 字节`;
+}
+
+// ===== File Upload Functions (T032-T036) =====
+
+// 全局变量存储当前选中的文件
+let currentFile = null;
+
+// Drag and Drop Event Handlers (T032)
+document.addEventListener('DOMContentLoaded', function() {
+    // 初始化UI状态，根据默认选中的模式显示/隐藏对应区域
+    handleModeChange();
+
+    const dropZone = document.getElementById('dropZone');
+    if (!dropZone) return;
+
+    dropZone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('drag-over');
+    });
+
+    dropZone.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-over');
+    });
+
+    dropZone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-over');
+
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            handleFileUpload(files[0]);
+        }
+    });
+});
+
+// File Input Change Handler (T033)
+function handleFileInputChange(event) {
+    const files = event.target.files;
+    if (files.length > 0) {
+        handleFileUpload(files[0]);
+    }
+}
+
+// Handle File Upload (T034)
+function handleFileUpload(file) {
+    currentFile = file;
+
+    // Display file info
+    document.getElementById('fileName').textContent = file.name;
+    document.getElementById('fileSize').textContent = formatBytes(file.size);
+    document.getElementById('fileType').textContent = file.type || '未知类型';
+
+    // Estimate QR count (T035)
+    const estimate = estimateQRCount(file);
+    document.getElementById('estimatedQRCount').textContent = estimate.qrCount;
+    document.getElementById('estimatedScanTime').textContent = estimate.scanTime;
+
+    // Show file info display
+    document.getElementById('file-info-display').style.display = 'block';
+
+    // 更新生成按钮文本，提示用户当前将生成文件QR
+    const generateBtn = document.getElementById('generateBtn');
+    if (generateBtn) {
+        generateBtn.innerHTML = '📁 生成文件二维码';
+        generateBtn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+    }
+
+    // Check for large files and show warning
+    if (estimate.qrCount > 100) {
+        showWarning(`预计生成${estimate.qrCount}个二维码，扫描需约${estimate.scanTime}分钟。建议压缩文件以减少二维码数量。`);
+    }
+
+    // Check for executable files
+    const executableExtensions = ['.exe', '.bat', '.sh', '.cmd', '.com', '.app', '.dmg'];
+    const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    if (executableExtensions.includes(fileExtension)) {
+        showWarning('检测到可执行文件类型，请确认文件来源安全。');
+    }
+
+    console.log(`文件已选择: ${file.name}, 大小: ${file.size} 字节, 预计${estimate.qrCount}个QR码`);
+}
+
+// Estimate QR Count (T035)
+function estimateQRCount(file) {
+    const base64Size = file.size * 1.37; // Base64 编码会增加约37%
+    const firstFragmentSize = 800; // 第一片包含元数据，需要很小以容纳中文文件名(QR编码开销)
+    const fragmentSize = 2800; // 其他片的正常容量
+
+    // 第一片用800字节，其余用2800字节
+    let remainingSize = base64Size - firstFragmentSize;
+    let qrCount = 1; // 第一片
+
+    if (remainingSize > 0) {
+        qrCount += Math.ceil(remainingSize / fragmentSize);
+    }
+
+    const scanTime = Math.ceil(qrCount * 2 / 60); // 假设每个QR码扫描需要2秒
+
+    return {
+        qrCount: qrCount,
+        scanTime: scanTime
+    };
+}
+
+// Format Bytes (T036)
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+// Generate File QR Codes (T037)
+function generateFileQR() {
+    if (!currentFile) {
+        showError('请先选择文件');
+        return;
+    }
+
+    clearMessages();
+    console.log(`开始生成文件QR码: ${currentFile.name}`);
+
+    const display = document.getElementById('qrDisplay');
+    display.innerHTML = '<p style="text-align: center; color: #666;">正在读取文件...</p>';
+
+    // Use FileReader to read file as Base64
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+        try {
+            const base64Data = e.target.result; // data:image/png;base64,xxxxx
+            console.log(`文件读取完成，Base64长度: ${base64Data.length}`);
+
+            // Calculate checksum (T039)
+            const checksum = calculateSimpleChecksum(base64Data);
+            console.log(`校验和: ${checksum}`);
+
+            // Chunk file (T038)
+            const fragments = chunkFile(currentFile, base64Data, checksum);
+            console.log(`文件已分片: ${fragments.length} 片`);
+            console.log(`第1片数据大小: ${fragments[0].data.length} 字节 (含元数据，较小以容纳中文文件名)`);
+
+            // Generate QR codes for each fragment using existing private mode logic
+            generatePrivateQRCodes(fragments);
+
+        } catch (error) {
+            showError('文件处理失败: ' + error.message);
+            console.error('File QR generation error:', error);
+        }
+    };
+
+    reader.onerror = function() {
+        showError('文件读取失败');
+        console.error('FileReader error');
+    };
+
+    // Read file as Data URL (includes MIME type and base64)
+    reader.readAsDataURL(currentFile);
+}
+
+// Chunk File (T038)
+function chunkFile(file, base64Data, checksum) {
+    // Remove data URL prefix to get pure base64
+    const base64 = base64Data.replace(/^data:[^;]+;base64,/, '');
+
+    const fragmentSize = 2800; // Normal fragment size
+    const firstFragmentSize = 800; // Very small size for first fragment to accommodate metadata with Chinese chars (QR encoding overhead)
+    const fragments = [];
+
+    let position = 0;
+    let index = 0;
+
+    while (position < base64.length) {
+        // Use smaller size for first fragment (has metadata), normal size for others
+        const chunkSize = (index === 0) ? firstFragmentSize : fragmentSize;
+        const chunk = base64.substr(position, chunkSize);
+
+        const fragment = {
+            type: "file",
+            index: index,
+            total: 0, // Will be set after loop
+            data: chunk
+        };
+
+        // Add metadata to first fragment only (T038)
+        // Use shortened keys to reduce JSON size
+        if (index === 0) {
+            fragment.meta = {
+                n: file.name,  // name
+                m: file.type || 'application/octet-stream',  // mimeType
+                s: file.size,  // size
+                c: checksum    // checksum
+            };
+        }
+
+        fragments.push(fragment);
+        position += chunkSize;
+        index++;
+    }
+
+    // Set total count
+    fragments.forEach(f => f.total = fragments.length);
+
+    return fragments;
+}
+
+// Calculate Simple Checksum (T039)
+function calculateSimpleChecksum(data) {
+    // Simple hash for integrity verification
+    let hash = 0;
+    for (let i = 0; i < data.length; i++) {
+        const char = data.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(16);
+}
+
+// Helper function to generate private QR codes from fragments (T040 - reuse existing)
+function generatePrivateQRCodes(fragments) {
+    const display = document.getElementById('qrDisplay');
+    display.innerHTML = '';
+    qrCodes = []; // Reset QR codes array
+
+    fragments.forEach((fragment, index) => {
+        const container = document.createElement('div');
+        container.className = 'qr-item';
+
+        const qrDiv = document.createElement('div');
+        container.appendChild(qrDiv);
+
+        const label = document.createElement('div');
+        const typeLabel = fragment.type === 'file' ? '文件' : '文本';
+        label.textContent = `${typeLabel} - 第 ${index + 1} / ${fragments.length} 片`;
+        // Support both old (metadata) and new (meta) formats
+        const meta = fragment.meta || fragment.metadata;
+        if (fragment.type === 'file' && meta) {
+            const fileName = meta.n || meta.fileName;
+            label.textContent += `\n📄 ${fileName}`;
+        }
+        label.style.whiteSpace = 'pre-line';
+        container.appendChild(label);
+
+        display.appendChild(container);
+
+        // Convert fragment to JSON string
+        const qrData = JSON.stringify(fragment);
+
+        // Generate QR code
+        const correctLevel = QRCode.CorrectLevel.L; // Use L level for maximum capacity
+        try {
+            new QRCode(qrDiv, {
+                text: qrData,
+                width: 200,
+                height: 200,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: correctLevel
+            });
+        } catch (error) {
+            console.error(`生成第${index + 1}片QR码失败:`, error);
+            console.error(`失败片段JSON长度: ${qrData.length} 字节`);
+            if (index === 0) {
+                console.error(`第1片包含元数据:`, fragment.meta || fragment.metadata);
+            }
+            // 显示错误信息
+            qrDiv.innerHTML = `<div style="color:red; padding:10px; border:2px solid red;">
+                ❌ 第${index + 1}片生成失败<br>
+                数据长度: ${qrData.length}字节<br>
+                请尝试压缩文件
+            </div>`;
+        }
+
+        // 无论成功失败都要push，保持索引一致
+        qrCodes.push({ element: container, data: qrData });
+    });
+
+    console.log(`成功生成${qrCodes.length}个QR码`);
+
+    // Switch to grid mode after generation
+    setMode('grid');
+}
+
+// ===== Universal QR Generation Functions (T012-T015) =====
+
+// Universal QR Generation (T012)
+function generateUniversalQR(text) {
+    const errorLevel = document.getElementById('universalErrorLevel').value;
+
+    // Validate text length (T014)
+    const validation = validateTextLength(text, errorLevel);
+    if (!validation.valid) {
+        showError(`文本过长(${validation.byteLength}字节)，当前容量上限${validation.maxCapacity}字节。建议使用私有模式或降低纠错级别。`);
+        return false;
+    }
+
+    // Check for special characters and encode if needed (T015)
+    const encodingResult = encodeForUniversalQR(text);
+
+    const display = document.getElementById('qrDisplay');
+    display.innerHTML = '';
+    clearMessages();
+
+    if (encodingResult.needsWarning) {
+        showWarning(encodingResult.warningMessage);
+    }
+
+    // Create QR code container
+    const container = document.createElement('div');
+    container.className = 'qr-item';
+
+    const qrDiv = document.createElement('div');
+    container.appendChild(qrDiv);
+
+    const label = document.createElement('div');
+    label.textContent = '通用二维码 - 可用第三方扫描器扫描';
+    label.style.marginTop = '10px';
+    label.style.fontWeight = 'bold';
+    label.style.color = '#4CAF50';
+    container.appendChild(label);
+
+    display.appendChild(container);
+
+    // Generate QR code with plain text (no JSON wrapper)
+    const correctLevelMap = {
+        'L': QRCode.CorrectLevel.L,
+        'M': QRCode.CorrectLevel.M,
+        'Q': QRCode.CorrectLevel.Q,
+        'H': QRCode.CorrectLevel.H
+    };
+
+    try {
+        new QRCode(qrDiv, {
+            text: encodingResult.encoded,
+            width: 300,
+            height: 300,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: correctLevelMap[errorLevel]
+        });
+
+        console.log(`通用QR码生成成功: ${validation.byteLength}/${validation.maxCapacity} 字节`);
+        if (encodingResult.needsWarning) {
+            console.log(`文本已编码: ${encodingResult.warningMessage}`);
+        }
+
+        return true;
+    } catch (error) {
+        showError('生成二维码失败: ' + error.message);
+        console.error('Universal QR generation failed:', error);
+        return false;
+    }
+}
+
+// ===== 应用主要功能 =====
+
 function generateQR() {
+    // 智能判断：如果私有模式且有文件，生成文件QR；否则生成文本QR
+    if (isModePrivate() && currentFile) {
+        // 优先生成文件QR
+        generateFileQR();
+        return;
+    }
+
     const text = document.getElementById('textInput').value;
-    if (!text) { alert('请输入文本'); return; }
-    
+    if (!text) {
+        alert('请输入文本或上传文件');
+        return;
+    }
+
+    // Check selected mode (T013)
+    if (isModeUniversal()) {
+        // Generate Universal QR Code
+        generateUniversalQR(text);
+        return;
+    }
+
+    // Otherwise, use existing private mode logic
     const display = document.getElementById('qrDisplay');
     display.innerHTML = '';
     qrCodes = []; // 重置QR码数组
@@ -250,8 +892,9 @@ function generateQR() {
             console.error('失败的数据内容:', qrData);
             qrDiv.innerHTML = '<div style="color:red;">QR码生成失败，数据过长</div>';
         }
-        
-        qrCodes.push(container);
+
+        // 统一格式：与文件QR生成保持一致
+        qrCodes.push({ element: container, data: qrData });
     });
     
     // 初始化循环范围控制
@@ -320,11 +963,17 @@ function setMode(newMode) {
             btn.classList.add('active');
         }
     });
-    
+
     const display = document.getElementById('qrDisplay');
     const singleControls = document.getElementById('singleControls');
     const loopControls = document.getElementById('loopControls');
-    
+
+    // 添加空值检查，避免报错
+    if (!display || !singleControls || !loopControls) {
+        console.error('缺少必要的显示控制元素');
+        return;
+    }
+
     // 设置显示类名
     if (mode === 'grid') {
         display.className = 'qr-display grid-mode';
@@ -338,10 +987,16 @@ function setMode(newMode) {
         loopControls.style.display = 'block';
         // 重置暂停状态
         isPaused = false;
-        document.getElementById('pauseBtn').textContent = '⏸ 暂停';
-        document.getElementById('pauseBtn').style.background = '#ff9800';
-        document.getElementById('loopStatus').textContent = '▶ 播放中';
-        document.getElementById('loopStatus').style.color = '#4CAF50';
+        const pauseBtn = document.getElementById('pauseBtn');
+        const loopStatus = document.getElementById('loopStatus');
+        if (pauseBtn) {
+            pauseBtn.textContent = '⏸ 暂停';
+            pauseBtn.style.background = '#ff9800';
+        }
+        if (loopStatus) {
+            loopStatus.textContent = '▶ 播放中';
+            loopStatus.style.color = '#4CAF50';
+        }
         startLoop();
     } else if (mode === 'single') {
         display.className = 'qr-display single-mode';
@@ -383,19 +1038,25 @@ function stopLoop() {
     }
     // 显示所有QR码
     qrCodes.forEach(item => {
-        item.style.display = 'block';
+        if (item && item.element) {
+            item.element.style.display = 'block';
+        }
     });
 }
 
 function showQRCode(index) {
     qrCodes.forEach((item, i) => {
-        item.style.display = (i === index) ? 'block' : 'none';
+        if (item && item.element) {
+            item.element.style.display = (i === index) ? 'block' : 'none';
+        }
     });
 }
 
 function showAllQRCodes() {
     qrCodes.forEach(item => {
-        item.style.display = 'block';
+        if (item && item.element) {
+            item.element.style.display = 'block';
+        }
     });
 }
 
