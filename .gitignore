@@ -17,3 +17,5 @@ temp-tests/
 *.md
 !README.md
 !LICENSE
+!specs/**/*.md
+!.specify/**/*.md
