@@ -543,14 +543,19 @@ function generateFileQR() {
             const base64Data = e.target.result; // data:image/png;base64,xxxxx
             console.log(`文件读取完成，Base64长度: ${base64Data.length}`);
 
-            // Calculate checksum (T039)
-            const checksum = calculateSimpleChecksum(base64Data);
+            // FIX: Remove data URL prefix BEFORE calculating checksum
+            // This ensures checksum matches receiver's reassembled data (which is pure base64)
+            const pureBase64 = base64Data.replace(/^data:[^;]+;base64,/, '');
+
+            // Calculate checksum on PURE Base64 (T039)
+            const checksum = calculateSimpleChecksum(pureBase64);
             console.log(`校验和: ${checksum}`);
 
             // Chunk file (T038)
-            const fragments = chunkFile(currentFile, base64Data, checksum);
+            // Note: We pass pureBase64 directly now, so chunkFile function needs to handle it
+            const fragments = chunkFile(currentFile, pureBase64, checksum);
             console.log(`文件已分片: ${fragments.length} 片`);
-            console.log(`第1片数据大小: ${fragments[0].data.length} 字节 (含元数据，较小以容纳中文文件名)`);
+            console.log(`第1片数据大小: ${fragments[0].data.length} 字节 (含元数据)`);
 
             // Generate QR codes for each fragment using existing private mode logic
             generatePrivateQRCodes(fragments);
@@ -571,9 +576,9 @@ function generateFileQR() {
 }
 
 // Chunk File (T038)
-function chunkFile(file, base64Data, checksum) {
-    // Remove data URL prefix to get pure base64
-    const base64 = base64Data.replace(/^data:[^;]+;base64,/, '');
+function chunkFile(file, pureBase64, checksum) {
+    // base64 is already stripped in generateFileQR
+    const base64 = pureBase64;
 
     // FIX: Reduced chunk sizes to avoid "code length overflow" and improve scanability.
     // The library limit is ~932 bytes.
