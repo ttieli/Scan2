@@ -279,6 +279,61 @@ body {
 body.has-recovery-banner {
     padding-top: 70px;
 }
+
+/* Progress Map Styles */
+.progress-map {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin-top: 15px;
+    padding: 10px;
+    background: #f1f1f1;
+    border-radius: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.progress-map-title {
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 5px;
+    color: #555;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.map-item {
+    width: 12px;
+    height: 12px;
+    background: #ddd; /* Pending color */
+    border-radius: 2px;
+    transition: background 0.2s;
+}
+
+.map-item.received {
+    background: #4CAF50; /* Received color */
+}
+
+.map-legend {
+    display: flex;
+    gap: 15px;
+    font-size: 11px;
+    color: #666;
+    margin-top: 5px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.legend-box {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+}
 </style>
 </head>
 <body>
@@ -305,6 +360,19 @@ body.has-recovery-banner {
         <div id="scanStatus" class="progress-indicator" style="display:none;">
             <span id="scanProgress">准备中...</span>
             <span id="scanCount">0/0</span>
+        </div>
+        
+        <!-- Progress Map Container -->
+        <div id="progressMapContainer" style="display:none; margin-bottom: 15px;">
+            <div class="progress-map-title">
+                <span>片段接收详情</span>
+                <span id="mapStats" style="font-weight:normal; font-size:12px;"></span>
+            </div>
+            <div id="progressMap" class="progress-map"></div>
+            <div class="map-legend">
+                <div class="legend-item"><div class="legend-box" style="background:#4CAF50;"></div>已接收</div>
+                <div class="legend-item"><div class="legend-box" style="background:#ddd;"></div>待接收</div>
+            </div>
         </div>
         
         <div class="video-controls" id="videoControls" style="display:none;">
@@ -10688,6 +10756,9 @@ function handleTextFragment(data) {
     currentSession.totalFragments = data.t;
     saveSession(currentSession);
 
+    // FIX: Update visual progress map for text
+    updateProgressMap(totalChunks, chunks);
+
     updateOutput();
     updateScanProgress('🔍 扫描中...', Object.keys(chunks).length, totalChunks);
 
@@ -10789,6 +10860,10 @@ function handleFileFragment(fragment) {
         saveSession(currentSession);
     }
 
+    // FIX: Update visual progress map for files
+    // Note: fileFragments uses integer keys 0,1,2..., which matches our map logic
+    updateProgressMap(fragment.total, fileFragments);
+
     // 更新进度
     const receivedCount = Object.keys(fileFragments).length;
     document.getElementById('fileProgressText').textContent = `${receivedCount} / ${fragment.total}`;
@@ -10857,6 +10932,45 @@ function completeFileTransfer() {
 
     // 自动触发下载（可选）
     // triggerFileDownload();
+}
+
+// Update Visual Progress Map
+function updateProgressMap(total, receivedIndicesObj) {
+    const container = document.getElementById('progressMapContainer');
+    const map = document.getElementById('progressMap');
+    const stats = document.getElementById('mapStats');
+    
+    // Show container if hidden
+    if (container.style.display === 'none') {
+        container.style.display = 'block';
+    }
+
+    // Initialize grid if empty or size changed
+    if (map.childElementCount !== total) {
+        map.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        for (let i = 0; i < total; i++) {
+            const div = document.createElement('div');
+            div.className = 'map-item';
+            div.id = `map-item-${i}`;
+            div.title = `第 ${i + 1} 片`;
+            fragment.appendChild(div);
+        }
+        map.appendChild(fragment);
+    }
+
+    // Mark received items
+    Object.keys(receivedIndicesObj).forEach(index => {
+        const item = document.getElementById(`map-item-${index}`);
+        if (item && !item.classList.contains('received')) {
+            item.classList.add('received');
+        }
+    });
+
+    // Update stats text
+    const receivedCount = Object.keys(receivedIndicesObj).length;
+    const percentage = Math.round((receivedCount / total) * 100);
+    stats.textContent = `${percentage}% (${receivedCount}/${total})`;
 }
 
 // 简单校验和计算（与sender.html保持一致）

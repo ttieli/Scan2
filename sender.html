@@ -699,6 +699,10 @@ function generatePrivateQRCodes(fragments) {
 
     // Switch to grid mode after generation
     setMode('grid');
+    
+    // FIX: Automatically reset loop range to full range (1 to Total) whenever new QR codes are generated
+    resetLoopRange();
+    console.log(`循环范围已重置: 第1片 到 第${qrCodes.length}片`);
 }
 
 // ===== Universal QR Generation Functions (T012-T015) =====
