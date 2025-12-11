@@ -10792,6 +10792,9 @@ function handleFileFragment(fragment) {
     // 更新进度
     const receivedCount = Object.keys(fileFragments).length;
     document.getElementById('fileProgressText').textContent = `${receivedCount} / ${fragment.total}`;
+    
+    // FIX: Also update the main scan progress indicator so the user sees progress in the camera view overlay
+    updateScanProgress(`📁 接收文件中: ${receivedCount}/${fragment.total}`, receivedCount, fragment.total);
 
     // 播放提示音
     try {
