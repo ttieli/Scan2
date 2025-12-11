@@ -19,7 +19,71 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .qr-display.loop-mode { display: flex; justify-content: center; align-items: center; min-height: 400px; }
 .qr-display.loop-mode .qr-item { transform: scale(1.5); }
 .qr-display.single-mode { display: flex; justify-content: center; align-items: center; min-height: 400px; }
-.qr-display.single-mode .qr-item { transform: scale(1.5); }
+.qr-display.single-mode .qr-item { transform: none; box-shadow: none; background: transparent; }
+/* Fullscreen Single Mode Overlay */
+#singleQRContainer {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.95);
+    z-index: 1000;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+#singleQRContent {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    max-width: 90vw;
+    max-height: 80vh;
+}
+#singleQRContent img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+#singleQRControls {
+    margin-top: 20px;
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    background: rgba(255,255,255,0.8);
+    padding: 10px 20px;
+    border-radius: 30px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+#singleQRInfo {
+    margin-top: 10px;
+    font-size: 16px;
+    color: #333;
+    font-weight: bold;
+}
+.close-single-mode {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: #ff4444;
+    color: white;
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
 .options-panel { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 15px; }
 .option-group { flex: 1; min-width: 200px; }
 .option-group label { display: block; margin-bottom: 5px; font-weight: 500; }
@@ -213,6 +277,18 @@ textarea { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8p
     <div class="section">
         <h2>二维码显示</h2>
         <div class="qr-display grid-mode" id="qrDisplay"></div>
+    </div>
+</div>
+
+<!-- Fullscreen Single QR Container -->
+<div id="singleQRContainer">
+    <button class="close-single-mode" onclick="exitSingleMode()">×</button>
+    <div id="singleQRInfo">第 1 / X 张</div>
+    <div id="singleQRContent"></div>
+    <div id="singleQRControls">
+        <button class="btn" onclick="previousQR()" style="padding: 10px 20px;">⬅️ 上一张</button>
+        <span style="font-size: 14px; color: #666;">支持键盘 ← → 切换</span>
+        <button class="btn" onclick="nextQR()" style="padding: 10px 20px;">下一张 ➡️</button>
     </div>
 </div>
 
@@ -1011,14 +1087,40 @@ function setMode(newMode) {
         }
         startLoop();
     } else if (mode === 'single') {
-        display.className = 'qr-display single-mode';
-        singleControls.style.display = 'block';
-        loopControls.style.display = 'none';
+        // Fullscreen Single Mode
         stopLoop();
-        updateSingleModeSelector();
-        showQRCode(currentIndex);
-        updateQRIndex();
+        enterSingleMode();
     }
+}
+
+// Fullscreen Single Mode Logic
+function enterSingleMode() {
+    const container = document.getElementById('singleQRContainer');
+    if (container) {
+        container.style.display = 'flex';
+        // Start from current index or 0
+        showQRCode(currentIndex);
+        
+        // Add keyboard listener
+        document.addEventListener('keydown', handleSingleModeKeys);
+    }
+}
+
+function exitSingleMode() {
+    const container = document.getElementById('singleQRContainer');
+    if (container) {
+        container.style.display = 'none';
+        document.removeEventListener('keydown', handleSingleModeKeys);
+        
+        // Revert to grid mode visually in the UI buttons
+        setMode('grid'); 
+    }
+}
+
+function handleSingleModeKeys(e) {
+    if (e.key === 'ArrowLeft') previousQR();
+    if (e.key === 'ArrowRight') nextQR();
+    if (e.key === 'Escape') exitSingleMode();
 }
 
 function startLoop() {
@@ -1028,7 +1130,9 @@ function startLoop() {
     
     // 设置循环起始位置（转换为0基索引）
     currentIndex = Math.max(0, loopStart - 1);
-    showQRCode(currentIndex);
+    // Note: showQRCode handles both single (fullscreen) and loop (inline) updates.
+    // For loop mode, we might need a separate update function if we want to keep using the inline display.
+    // Let's make showQRCode smart.
     updateLoopDisplay();
     
     // 根据用户设置的速度切换，只在指定范围内循环
@@ -1038,9 +1142,18 @@ function startLoop() {
         if (currentIndex >= loopEnd) {
             currentIndex = loopStart - 1; // 转换为0基索引
         }
-        showQRCode(currentIndex);
+        updateLoopQR(currentIndex); // Use specific function for loop
         updateLoopDisplay();
     }, loopSpeed);
+}
+
+// Special update for loop mode (inline)
+function updateLoopQR(index) {
+    qrCodes.forEach((item, i) => {
+        if (item && item.element) {
+            item.element.style.display = (i === index) ? 'block' : 'none';
+        }
+    });
 }
 
 function stopLoop() {
@@ -1056,12 +1169,59 @@ function stopLoop() {
     });
 }
 
+// Unified Show QR Code (Handlers both Fullscreen Single and Inline Loop logic if needed, but primarily Fullscreen now)
 function showQRCode(index) {
-    qrCodes.forEach((item, i) => {
-        if (item && item.element) {
-            item.element.style.display = (i === index) ? 'block' : 'none';
+    // 1. Update Fullscreen View
+    const contentDiv = document.getElementById('singleQRContent');
+    const infoDiv = document.getElementById('singleQRInfo');
+    
+    if (contentDiv && qrCodes[index]) {
+        contentDiv.innerHTML = ''; // Clear previous
+        
+        // Calculate max available size
+        // Viewport - padding (40px) - controls height (approx 100px)
+        const vw = Math.min(window.innerWidth * 0.9, window.innerHeight * 0.8);
+        const size = Math.floor(vw);
+
+        // Generate new large QR code
+        try {
+            new QRCode(contentDiv, {
+                text: qrCodes[index].data, // Use stored raw data string
+                width: size,
+                height: size,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.L
+            });
+            
+            // Update Info Text
+            let infoText = `第 ${index + 1} / ${qrCodes.length} 张`;
+            // Try to parse data to get file info if available
+            try {
+                const data = JSON.parse(qrCodes[index].data);
+                if (data.type === 'file' && (data.meta || data.metadata)) {
+                    const meta = data.meta || data.metadata;
+                    const name = meta.n || meta.fileName;
+                    infoText += ` - ${name}`;
+                }
+            } catch(e) {}
+            
+            infoDiv.textContent = infoText;
+            
+        } catch (e) {
+            console.error('Generarte large QR failed', e);
         }
-    });
+    }
+    
+    // 2. Also ensure inline elements are handled correctly if we just switched
+    // For single mode, we use the fullscreen overlay, so inline items don't matter much, 
+    // but we can hide them all to be clean.
+    if (mode === 'single') {
+         qrCodes.forEach(item => {
+            if (item && item.element) item.element.style.display = 'block'; // Or none? Grid mode shows all.
+        });
+    }
+}
 }
 
 function showAllQRCodes() {
