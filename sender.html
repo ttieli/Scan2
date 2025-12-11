@@ -575,8 +575,11 @@ function chunkFile(file, base64Data, checksum) {
     // Remove data URL prefix to get pure base64
     const base64 = base64Data.replace(/^data:[^;]+;base64,/, '');
 
-    const fragmentSize = 2800; // Normal fragment size
-    const firstFragmentSize = 800; // Very small size for first fragment to accommodate metadata with Chinese chars (QR encoding overhead)
+    // FIX: Reduced chunk sizes to avoid "code length overflow" errors with the embedded QR library.
+    // The library seems to limit at ~932 bytes (7456 bits), so we need to stay safely below that.
+    // Previous values (2800/800) were too aggressive.
+    const fragmentSize = 850; // Reduced from 2800 to safe margin below 932 bytes
+    const firstFragmentSize = 600; // Reduced from 800 to accommodate metadata
     const fragments = [];
 
     let position = 0;
