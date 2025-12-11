@@ -191,7 +191,7 @@ textarea { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8p
         </div>
 
         <!-- File Upload Area (T028) - Initially hidden, shown only in private mode -->
-        <div id="file-upload-area" style="display: none; margin-top: 20px;">
+        <div id="file-upload-area" style="display: block; margin-top: 20px;">
             <h3 style="font-size: 16px; margin-bottom: 10px;">📁 文件上传</h3>
             <div class="drop-zone" id="dropZone">
                 <p style="font-size: 18px; margin-bottom: 10px;">📤 拖拽文件到这里</p>
@@ -1221,7 +1221,6 @@ function showQRCode(index) {
             if (item && item.element) item.element.style.display = 'block'; // Or none? Grid mode shows all.
         });
     }
-}
 }
 
 function showAllQRCodes() {
