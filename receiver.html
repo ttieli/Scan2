@@ -419,6 +419,10 @@ body.has-recovery-banner {
                     已接收: <span id="fileProgressText">0 / 0</span> 片
                 </div>
             </div>
+            <div id="checksumError" style="display:none; margin: 10px 0; padding: 12px; background: #fff3cd; border: 2px solid #ffc107; border-radius: 6px; color: #856404;">
+                <strong>⚠️ 校验和不匹配</strong>
+                <p style="margin: 5px 0 0 0; font-size: 13px;">文件数据可能损坏。您仍可尝试下载，但文件可能无法正常使用。</p>
+            </div>
             <button class="btn" id="downloadBtn" onclick="triggerFileDownload()" style="width: 100%; background: #4CAF50; font-size: 16px;">⬇️ 下载文件</button>
         </div>
 
@@ -10642,8 +10646,11 @@ async function startScan() {
         
     } catch (err) {
         console.error('摄像头访问失败:', err);
-        alert('无法访问摄像头: ' + err.message);
-        updateScanProgress('❌ 摄像头访问失败: ' + err.message, 0, 0);
+        let hint = err.message;
+        if (window.location.protocol !== 'https:' && window.location.protocol !== 'file:') {
+            hint += '（提示：摄像头功能需要 HTTPS 或本地文件访问）';
+        }
+        updateScanProgress('❌ 摄像头访问失败: ' + hint, 0, 0);
         resetScanUI();
     }
 }
@@ -10913,10 +10920,8 @@ function completeFileTransfer() {
 
         if (calculatedChecksum !== fileMetadata.checksum) {
             console.error('校验和不匹配！文件可能损坏');
-            alert('文件校验失败，数据可能损坏。是否仍要下载？\n\n如果选择"取消"，请重新扫描二维码。');
-            if (!confirm('文件校验失败，是否仍要下载？')) {
-                return;
-            }
+            const errorDiv = document.getElementById('checksumError');
+            if (errorDiv) errorDiv.style.display = 'block';
         } else {
             console.log('校验和验证通过 ✓');
         }
@@ -11060,6 +11065,12 @@ function saveSession(session) {
         console.log('会话已保存:', session.id);
     } catch (e) {
         console.error('保存会话失败:', e);
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+            const statusEl = document.getElementById('scanProgress');
+            if (statusEl) {
+                statusEl.textContent = '⚠️ 存储空间不足，会话无法自动保存（扫描仍可继续）';
+            }
+        }
     }
 }
 
