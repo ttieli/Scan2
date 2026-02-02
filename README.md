@@ -41,10 +41,7 @@ Visit: **[https://ttieli.github.io/Scan2/](https://ttieli.github.io/Scan2/)**
 ├── index.html        # Main landing page
 ├── sender.html       # Data encoding & QR generation application
 ├── receiver.html     # Camera scanning & data reassembly application
-├── README.md         # This documentation
-└── test/             # Contains a complete copy of the working code for testing
-    ├── test-sender.html
-    └── test-receiver.html
+└── README.md         # This documentation
 ```
 
 ## ✨ Key Features
@@ -58,4 +55,4 @@ Visit: **[https://ttieli.github.io/Scan2/](https://ttieli.github.io/Scan2/)**
 
 ## 🛠 Testing
 
-A complete copy of the functional application is located in the `test/` directory. You can use these files to test modifications without affecting the main production files.
+Test files are maintained locally in the `_local/` directory (not included in the repository). Open `_local/test-runner.html` in a browser to run the automated test suite, which validates checksum logic, chunk estimation accuracy, protocol format, and session management.
