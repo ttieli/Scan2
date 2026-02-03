@@ -11378,8 +11378,8 @@ function triggerFileDownload() {
             bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // 创建Blob
-        const blob = new Blob([bytes], { type: fileMetadata.mimeType });
+        // 创建Blob（使用 octet-stream 防止浏览器根据 MIME 追加扩展名如 .md → .md.txt）
+        const blob = new Blob([bytes], { type: 'application/octet-stream' });
 
         // 创建下载链接（iOS Safari兼容方式）
         const url = URL.createObjectURL(blob);
