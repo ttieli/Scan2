@@ -314,7 +314,7 @@ body.has-recovery-banner { padding-top: 70px; }
                 <div id="missingFragmentsList" style="display:none; background:var(--bg-input); padding:12px; border-radius:12px; font-size:13px; max-height:200px; overflow-y:auto;"></div>
             </div>
 
-            <div id="retransmitCodeSection" style="display:none; margin:15px 0;">
+            <div id="retransmitCodeSection" style="margin:15px 0;">
                 <button class="btn" onclick="generateRetransmitCode()" style="background:var(--accent); width:100%;" data-zh="🔄 生成补传码" data-en="🔄 Retransmit Code">🔄 生成补传码</button>
                 <div id="retransmitCodeDisplay" style="display:none; margin-top:10px; background:var(--bg-input); padding:12px; border-radius:12px; text-align:center;">
                     <div style="font-size:13px; color:var(--text-secondary); margin-bottom:6px;" data-zh="将此码输入发送端：" data-en="Enter on sender:">将此码输入发送端：</div>
@@ -10616,8 +10616,6 @@ function resetToReady() {
     if (mfs) { mfs.style.display = 'none'; }
     var mfl = document.getElementById('missingFragmentsList');
     if (mfl) { mfl.style.display = 'none'; mfl.innerHTML = ''; }
-    var rcs = document.getElementById('retransmitCodeSection');
-    if (rcs) { rcs.style.display = 'none'; }
     var rcd = document.getElementById('retransmitCodeDisplay');
     if (rcd) { rcd.style.display = 'none'; }
     updateProgressBar(0, 1);
@@ -10832,11 +10830,9 @@ function handleTextFragment(data) {
     // FIX: Update visual progress map for text
     updateProgressMap(totalChunks, chunks, data.i);
 
-    // Show missing fragments button and retransmit code button
+    // Show missing fragments button
     var mfs = document.getElementById('missingFragmentsSection');
     if (mfs) mfs.style.display = 'block';
-    var rcs = document.getElementById('retransmitCodeSection');
-    if (rcs) rcs.style.display = 'block';
 
     // Update last-scanned info
     const lsi = document.getElementById('lastScannedInfo');
@@ -10966,11 +10962,9 @@ function handleFileFragment(fragment) {
     // FIX: Update visual progress map for files
     updateProgressMap(fragment.total, fileFragments, fragment.index);
 
-    // Show missing fragments button and retransmit code button
+    // Show missing fragments button
     var mfs = document.getElementById('missingFragmentsSection');
     if (mfs) mfs.style.display = 'block';
-    var rcs = document.getElementById('retransmitCodeSection');
-    if (rcs) rcs.style.display = 'block';
 
     // Update last-scanned info
     const lsi = document.getElementById('lastScannedInfo');
