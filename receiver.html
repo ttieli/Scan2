@@ -8,425 +8,324 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>QR接收端 - 完全离线版</title>
 <style>
-/* 样式 */
-body { 
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
-    margin: 0; 
-    padding: 10px; 
-    background: #f5f5f5; 
+:root {
+    --bg-primary: #000000;
+    --bg-card: #1c1c1e;
+    --bg-card-hover: #2c2c2e;
+    --bg-input: #1c1c1e;
+    --accent: #0071e3;
+    --accent-hover: #0077ED;
+    --accent-subtle: rgba(0,113,227,0.12);
+    --text-primary: #f5f5f7;
+    --text-secondary: #86868b;
+    --text-muted: #6e6e73;
+    --border: #38383a;
+    --border-light: #48484a;
+    --success: #30d158;
+    --warning: #ff9f0a;
+    --error: #ff453a;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+    margin: 0; padding: 12px;
+    background: var(--bg-primary); color: var(--text-primary);
     -webkit-text-size-adjust: 100%;
 }
-.container { 
-    max-width: 800px; 
-    margin: 0 auto; 
+.container { max-width: 800px; margin: 0 auto; }
+.section {
+    background: var(--bg-card); padding: 20px; margin-bottom: 20px;
+    border-radius: 16px;
 }
-.section { 
-    background: white; 
-    padding: 15px; 
-    margin-bottom: 15px; 
-    border-radius: 10px; 
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+.btn {
+    background: var(--accent); color: #fff; border: none;
+    padding: 14px 28px; border-radius: 980px; cursor: pointer;
+    font-size: 16px; font-weight: 500; width: 100%; margin-bottom: 10px;
+    transition: background-color 0.2s; letter-spacing: -0.01em;
 }
-.btn { 
-    background: #4CAF50; 
-    color: white; 
-    border: none; 
-    padding: 12px 24px; 
-    border-radius: 6px; 
-    cursor: pointer; 
-    font-size: 16px;
-    width: 100%;
-    margin-bottom: 10px;
-}
-.btn:active { background: #45a049; }
+.btn:hover { background: var(--accent-hover); }
+.btn:active { opacity: 0.85; }
 
 .video-container {
-    position: relative;
-    width: 100%;
-    max-width: 320px;
-    margin: 10px auto;
-    overflow: hidden;
-    border-radius: 10px;
+    position: relative; width: 100%; max-width: 320px;
+    margin: 10px auto; overflow: hidden; border-radius: 16px;
 }
-
-#video { 
-    width: 100%; 
-    height: auto;
-    display: block;
-    background: #000;
-    object-fit: cover;
-    transition: all 0.3s ease;
+#video {
+    width: 100%; height: auto; display: block;
+    background: #000; object-fit: cover; transition: all 0.3s ease;
 }
-
-/* iOS Safari 专属样式 */
 @supports (-webkit-touch-callout: none) {
-    #video {
-        width: 100% !important;
-        height: auto !important;
-    }
-    
-    .video-container {
-        max-width: 320px;
-        max-height: 240px;
-        aspect-ratio: 4/3;
-    }
+    #video { width: 100% !important; height: auto !important; }
+    .video-container { max-width: 320px; max-height: 240px; aspect-ratio: 4/3; }
 }
+#video.hidden { display: none !important; }
+#video.minimized { max-width: 200px; max-height: 150px; opacity: 0.8; }
 
-#video.hidden {
-    display: none !important;
-}
-
-#video.minimized {
-    max-width: 200px;
-    max-height: 150px;
-    opacity: 0.8;
-}
-
-.video-controls {
-    display: flex;
-    gap: 10px;
-    margin: 10px 0;
-    align-items: center;
-    flex-wrap: wrap;
-}
-
+.video-controls { display: flex; gap: 10px; margin: 10px 0; align-items: center; flex-wrap: wrap; }
 .video-controls button {
-    background: #6c757d;
-    color: white;
-    border: none;
-    padding: 6px 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-    flex: 1;
-    min-width: 80px;
+    background: var(--bg-card-hover); color: var(--text-primary);
+    border: 1px solid var(--border); padding: 6px 12px; border-radius: 8px;
+    font-size: 12px; cursor: pointer; flex: 1; min-width: 80px;
 }
+.video-controls button:active { background: var(--bg-input); }
 
-.video-controls button:active {
-    background: #5a6268;
+#output {
+    background: var(--bg-input); padding: 15px; border-radius: 12px;
+    min-height: 80px; margin-top: 10px; font-family: monospace;
+    font-size: 14px; line-height: 1.4; word-wrap: break-word;
+    color: var(--text-primary);
 }
-
-#output { 
-    background: #f8f9fa; 
-    padding: 15px; 
-    border-radius: 8px; 
-    min-height: 80px; 
-    margin-top: 10px;
-    font-family: monospace;
-    font-size: 14px;
-    line-height: 1.4;
-    word-wrap: break-word;
-    border: 2px solid #e9ecef;
+#status {
+    margin-top: 10px; padding: 10px;
+    background: var(--accent-subtle); border-radius: 12px;
+    border-left: 4px solid var(--accent);
+    color: var(--accent); font-size: 14px; font-weight: 500;
 }
-
-#status { 
-    margin-top: 10px; 
-    padding: 10px; 
-    background: linear-gradient(135deg, #e3f2fd, #bbdefb);
-    border-radius: 6px;
-    border-left: 4px solid #2196f3;
-    color: #1565c0; 
-    font-size: 14px; 
-    font-weight: 500;
-}
-
 .progress-indicator {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: #fff3cd;
-    padding: 10px;
-    border-radius: 6px;
-    border-left: 4px solid #ffc107;
-    margin-top: 10px;
-    font-size: 14px;
-    color: #856404;
+    display: flex; justify-content: space-between; align-items: center;
+    background: rgba(255,159,10,0.08); padding: 10px; border-radius: 12px;
+    border-left: 4px solid var(--warning); margin-top: 10px;
+    font-size: 14px; color: var(--warning);
 }
-
 .scanning-indicator {
-    background: #d1ecf1;
-    border-left-color: #17a2b8;
-    color: #0c5460;
+    background: var(--accent-subtle);
+    border-left-color: var(--accent); color: var(--accent);
 }
-
 .success-indicator {
-    background: #d4edda;
-    border-left-color: #28a745;
-    color: #155724;
+    background: rgba(48,209,88,0.08);
+    border-left-color: var(--success); color: var(--success);
 }
 
-
-/* 移动端优化 */
+/* Mobile */
 @media (max-width: 768px) {
-    body { padding: 5px; }
-    .section { padding: 12px; margin-bottom: 10px; }
-    
-    .video-container {
-        max-width: 280px;
-    }
-    
-    /* iOS移动设备 */
+    body { padding: 6px; }
+    .section { padding: 16px; margin-bottom: 12px; }
+    .video-container { max-width: 280px; }
     @supports (-webkit-touch-callout: none) {
-        .video-container {
-            max-width: 280px;
-            max-height: 210px;
-        }
+        .video-container { max-width: 280px; max-height: 210px; }
     }
-    
-    #video.minimized {
-        max-width: 150px;
-        max-height: 112px;
-    }
-    
+    #video.minimized { max-width: 150px; max-height: 112px; }
     .btn { padding: 14px 20px; font-size: 16px; }
-    
-    .video-controls button {
-        font-size: 11px;
-        padding: 5px 8px;
-    }
+    .video-controls button { font-size: 11px; padding: 5px 8px; }
 }
-
 @media (max-width: 480px) {
-    .video-container { 
-        max-width: 240px;
-    }
-    
-    /* iOS小屏设备 */
+    .video-container { max-width: 240px; }
     @supports (-webkit-touch-callout: none) {
-        .video-container {
-            max-width: 240px;
-            max-height: 180px;
-        }
+        .video-container { max-width: 240px; max-height: 180px; }
     }
-    
-    #video.minimized {
-        max-width: 120px;
-        max-height: 90px;
-    }
+    #video.minimized { max-width: 120px; max-height: 90px; }
 }
 
-/* ========== T022: 会话恢复横幅样式 ========== */
+/* Recovery banner (legacy, kept hidden) */
 .recovery-banner {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    background: linear-gradient(135deg, #ffd54f 0%, #ffb300 100%);
-    color: #333;
-    padding: 15px 20px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    z-index: 9999;
+    position: fixed; top: 0; left: 0; right: 0;
+    background: var(--bg-card); color: var(--text-primary);
+    padding: 15px 20px; display: flex; justify-content: space-between;
+    align-items: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    z-index: 9999; border-bottom: 2px solid var(--warning);
     animation: slideDown 0.3s ease-out;
 }
-
 @keyframes slideDown {
-    from {
-        transform: translateY(-100%);
-        opacity: 0;
-    }
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
+    from { transform: translateY(-100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
 }
-
-.recovery-banner .message {
-    flex: 1;
-    font-size: 14px;
-    font-weight: 500;
-}
-
-.recovery-banner .message strong {
-    font-weight: 700;
-    color: #d84315;
-}
-
-.recovery-banner .actions {
-    display: flex;
-    gap: 10px;
-}
-
+.recovery-banner .message { flex: 1; font-size: 14px; font-weight: 500; }
+.recovery-banner .message strong { font-weight: 600; color: var(--warning); }
+.recovery-banner .actions { display: flex; gap: 10px; }
 .recovery-banner button {
-    background: #fff;
-    border: 2px solid #ff6f00;
-    color: #ff6f00;
-    padding: 8px 16px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
+    background: var(--bg-input); border: 1px solid var(--warning);
+    color: var(--warning); padding: 8px 16px; border-radius: 980px;
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: background-color 0.2s, color 0.2s;
 }
+.recovery-banner button:hover { background: var(--warning); color: var(--bg-primary); }
+.recovery-banner button.danger { border-color: var(--error); color: var(--error); }
+.recovery-banner button.danger:hover { background: var(--error); color: #fff; }
+body.has-recovery-banner { padding-top: 70px; }
 
-.recovery-banner button:hover {
-    background: #ff6f00;
-    color: white;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(255, 111, 0, 0.3);
-}
-
-.recovery-banner button.danger {
-    border-color: #d32f2f;
-    color: #d32f2f;
-}
-
-.recovery-banner button.danger:hover {
-    background: #d32f2f;
-    color: white;
-}
-
-/* 为页面留出横幅空间 */
-body.has-recovery-banner {
-    padding-top: 70px;
-}
-
-/* Progress Map Styles */
+/* Progress Map */
 .progress-map {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px;
-    margin-top: 15px;
-    padding: 10px;
-    background: #f1f1f1;
-    border-radius: 8px;
-    max-height: 200px;
-    overflow-y: auto;
+    display: flex; flex-wrap: wrap; gap: 2px; margin-top: 15px;
+    padding: 10px; background: var(--bg-input); border-radius: 12px;
+    max-height: 200px; overflow-y: auto;
 }
-
 .progress-map-title {
-    font-size: 14px;
-    font-weight: bold;
-    margin-bottom: 5px;
-    color: #555;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+    font-size: 14px; font-weight: 600; margin-bottom: 5px;
+    color: var(--text-secondary); display: flex;
+    justify-content: space-between; align-items: center;
 }
-
 .map-item {
-    width: 12px;
-    height: 12px;
-    background: #ddd; /* Pending color */
-    border-radius: 2px;
-    transition: background 0.2s;
+    width: 12px; height: 12px; background: var(--border-light);
+    border-radius: 2px; transition: background-color 0.2s;
 }
-
-.map-item.received {
-    background: #4CAF50; /* Received color */
-}
-
+.map-item.received { background: var(--success); }
 .map-legend {
-    display: flex;
-    gap: 15px;
-    font-size: 11px;
-    color: #666;
-    margin-top: 5px;
+    display: flex; gap: 15px; font-size: 11px;
+    color: var(--text-muted); margin-top: 5px;
 }
+.legend-item { display: flex; align-items: center; gap: 4px; }
+.legend-box { width: 10px; height: 10px; border-radius: 2px; }
 
-.legend-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.legend-box {
-    width: 10px;
-    height: 10px;
-    border-radius: 2px;
-}
+.video-small { max-width: 160px; margin: 0 auto 15px; }
+/* Top Nav */
+.top-nav { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:rgba(0,0,0,0.85); border-bottom:1px solid var(--border); }
+.top-nav a.nav-logo { color:var(--text-primary); text-decoration:none; font-weight:600; font-size:1rem; letter-spacing:-0.01em; }
+.top-nav .nav-links { display:flex; gap:4px; }
+.top-nav .nav-links a { padding:6px 16px; border-radius:980px; text-decoration:none; font-size:0.85rem; color:var(--text-secondary); transition:color 0.2s, background-color 0.2s; }
+.top-nav .nav-links a:hover { color:var(--text-primary); background:rgba(255,255,255,0.08); }
+.top-nav .nav-links a.active-send { color:#fff; background:var(--accent); }
+.top-nav .nav-links a.active-recv { color:#fff; background:var(--accent); }
+.top-nav .nav-lang { display:flex; gap:2px; background:rgba(255,255,255,0.06); border-radius:980px; padding:2px; }
+.top-nav .nav-lang button { background:none; border:none; color:var(--text-muted); padding:4px 12px; border-radius:980px; font-size:0.75rem; cursor:pointer; transition:background-color 0.2s, color 0.2s; }
+.top-nav .nav-lang button.active { background:var(--accent); color:#fff; }
 </style>
 </head>
 <body>
-<!-- ========== T021: 会话恢复横幅 ========== -->
-<div id="recovery-banner" class="recovery-banner" style="display: none;">
-    <div class="message">
-        <span id="recovery-message">🔄 检测到未完成的传输会话...</span>
+<nav class="top-nav" id="topNav">
+    <a class="nav-logo" href="index.html">QR Transfer</a>
+    <div class="nav-links">
+        <a href="sender.html" data-zh="发送" data-en="Sender">发送</a>
+        <a href="receiver.html" class="active-recv" data-zh="接收" data-en="Receiver">接收</a>
     </div>
+    <div class="nav-lang" id="langToggle">
+        <button data-lang="zh">中文</button>
+        <button data-lang="en">EN</button>
+    </div>
+</nav>
+<!-- Old recovery banner kept hidden for ID compat -->
+<div id="recovery-banner" class="recovery-banner" style="display:none !important;">
+    <div class="message"><span id="recovery-message"></span></div>
     <div class="actions">
         <button onclick="continueSession()">继续传输</button>
         <button class="danger" onclick="clearAndRestart()">重新开始</button>
     </div>
 </div>
 
+<!-- Hidden video controls for ID compat -->
+<div id="videoControls" style="display:none !important;">
+    <button onclick="toggleVideo()">👁️</button>
+    <button onclick="minimizeVideo()">📱</button>
+    <button onclick="normalizeVideo()">📺</button>
+</div>
+
 <div class="container">
-    <div class="section">
-        <h1>📥 QR接收端</h1>
-        <p>完全离线版 - 扫描二维码接收数据</p>
-        <p style="color: #999; font-size: 11px;">版本: 2025-09-02 20:45:00 | 支持Base64中文解码 | 摄像头显示控制</p>
-        
-        <button class="btn" id="scanBtn" onclick="startScan()">🎥 启动摄像头</button>
-        <button class="btn" id="stopBtn" onclick="stopScan()" style="display:none; background:#dc3545;">⏹️ 停止扫描</button>
-        
-        <div id="scanStatus" class="progress-indicator" style="display:none;">
-            <span id="scanProgress">准备中...</span>
-            <span id="scanCount">0/0</span>
-        </div>
-        
-        <!-- Progress Map Container -->
-        <div id="progressMapContainer" style="display:none; margin-bottom: 15px;">
-            <div class="progress-map-title">
-                <span>片段接收详情</span>
-                <span id="mapStats" style="font-weight:normal; font-size:12px;"></span>
-            </div>
-            <div id="progressMap" class="progress-map"></div>
-            <div class="map-legend">
-                <div class="legend-item"><div class="legend-box" style="background:#4CAF50;"></div>已接收</div>
-                <div class="legend-item"><div class="legend-box" style="background:#ddd;"></div>待接收</div>
+    <!-- State 0: Recovery -->
+    <div id="state-recovery" class="state-container" style="display:none;">
+        <div class="section" style="border-left: 4px solid var(--warning);">
+            <h2><span data-zh="🔄 检测到未完成的传输" data-en="🔄 Unfinished Transfer Detected"></span></h2>
+            <p id="recovery-detail" style="margin: 10px 0; color: var(--text-secondary);"></p>
+            <div style="display:flex; gap:10px; margin-top:15px;">
+                <button class="btn" onclick="continueSession()" style="flex:1;" data-zh="继续传输" data-en="Resume">继续传输</button>
+                <button class="btn" onclick="clearAndRestart()" style="flex:1; background:var(--error);" data-zh="重新开始" data-en="Start Fresh">重新开始</button>
             </div>
         </div>
-        
-        <div class="video-controls" id="videoControls" style="display:none;">
-            <button onclick="toggleVideo()">👁️ 隐藏/显示</button>
-            <button onclick="minimizeVideo()">📱 最小化</button>
-            <button onclick="normalizeVideo()">📺 正常大小</button>
-        </div>
-        
-        <div class="video-container">
-            <video id="video" playsinline webkit-playsinline muted autoplay style="display:none;"></video>
-        </div>
-        <canvas id="canvas" style="display:none;"></canvas>
     </div>
-    
-    <div class="section">
-        <h2>📄 接收的数据</h2>
-        <div id="chunksList" style="display:none; margin-bottom: 10px;">
-            <small style="color: #666;">已接收片段：</small>
-            <div id="chunksPreview" style="font-family: monospace; font-size: 12px; background: #f8f9fa; padding: 5px; border-radius: 4px; margin-top: 5px;"></div>
-        </div>
-        <div id="output">等待扫描...</div>
-        <button class="btn" id="copyBtn" onclick="copyResult()" style="display:none; margin-top: 10px; background: #007bff;">📋 复制数据</button>
 
-        <!-- File Download Section (T041, T042) -->
-        <div id="file-download-section" style="display:none; margin-top: 20px; padding: 20px; background: #e8f5e9; border-radius: 8px; border: 2px solid #4CAF50;">
-            <h3 style="margin: 0 0 15px 0; color: #2c6e49;">📁 文件已接收</h3>
-            <div style="margin-bottom: 10px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="color: #666;">文件名:</span>
-                    <span id="downloadFileName" style="font-weight: bold;"></span>
+    <!-- State 1: Ready -->
+    <div id="state-ready" class="state-container">
+        <div class="section" style="text-align:center; padding:80px 24px;">
+            <h1 style="margin-bottom:20px;"><span data-zh="📥 QR 接收端" data-en="📥 QR Receiver"></span></h1>
+            <p style="color:var(--text-secondary); margin-bottom:30px;"><span data-zh="扫描二维码接收数据" data-en="Scan QR codes to receive data"></span></p>
+            <button class="btn" id="scanBtn" onclick="startScan()" style="max-width:300px; margin:0 auto; font-size:18px; padding:18px 32px;" data-zh="🎥 启动摄像头" data-en="🎥 Start Camera">🎥 启动摄像头</button>
+        </div>
+    </div>
+
+    <!-- State 2A: Aiming -->
+    <div id="state-aiming" class="state-container" style="display:none;">
+        <div class="section">
+            <div class="video-container" style="max-width:320px; margin:0 auto;">
+                <video id="video" playsinline webkit-playsinline muted autoplay style="display:none;"></video>
+            </div>
+            <canvas id="canvas" style="display:none;"></canvas>
+            <p id="aiming-hint" style="text-align:center; margin-top:15px; font-size:16px; color:var(--text-secondary);" data-zh="请将摄像头对准二维码" data-en="Point camera at QR code">请将摄像头对准二维码</p>
+            <button class="btn" id="stopBtn" onclick="stopScan()" style="background:var(--error); margin-top:15px;" data-zh="⏹️ 停止扫描" data-en="⏹️ Stop">⏹️ 停止扫描</button>
+        </div>
+    </div>
+
+    <!-- State 2B: Receiving -->
+    <div id="state-receiving" class="state-container" style="display:none;">
+        <div class="section">
+            <!-- Small camera placeholder - video moved here by JS -->
+            <div class="video-container video-small" style="max-width:160px; margin:0 auto 15px;"></div>
+
+            <!-- Progress bar -->
+            <div id="progress-bar-container" style="margin:15px 0;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <span id="progress-label" style="font-size:14px; font-weight:500;" data-zh="接收中..." data-en="Receiving...">接收中...</span>
+                    <span id="progress-percent" style="font-size:14px; font-weight:bold;">0%</span>
                 </div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="color: #666;">文件大小:</span>
-                    <span id="downloadFileSize" style="font-weight: bold;"></span>
+                <div style="background:var(--bg-input); border-radius:6px; height:8px; overflow:hidden;">
+                    <div id="progress-bar-fill" style="background:var(--success); height:100%; width:0%; transition:width 0.3s;"></div>
                 </div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="color: #666;">文件类型:</span>
-                    <span id="downloadFileType" style="font-weight: bold;"></span>
+                <div id="progress-fraction" style="text-align:center; margin-top:4px; font-size:13px; color:var(--text-secondary);">0 / 0</div>
+            </div>
+
+            <!-- Existing scan status (hidden, kept for ID compat) -->
+            <div id="scanStatus" class="progress-indicator" style="display:none;">
+                <span id="scanProgress">准备中...</span>
+                <span id="scanCount">0/0</span>
+            </div>
+
+            <!-- Progress Map -->
+            <div id="progressMapContainer" style="display:none; margin-bottom:15px;">
+                <div class="progress-map-title">
+                    <span data-zh="片段接收详情" data-en="Fragment Details">片段接收详情</span>
+                    <span id="mapStats" style="font-weight:normal; font-size:12px;"></span>
                 </div>
-                <div id="fileProgress" style="margin-top: 10px; font-size: 14px; color: #666;">
-                    已接收: <span id="fileProgressText">0 / 0</span> 片
+                <div id="progressMap" class="progress-map"></div>
+                <div class="map-legend">
+                    <div class="legend-item"><div class="legend-box" style="background:var(--success);"></div><span data-zh="已接收" data-en="Received">已接收</span></div>
+                    <div class="legend-item"><div class="legend-box" style="background:var(--border-light);"></div><span data-zh="待接收" data-en="Pending">待接收</span></div>
                 </div>
             </div>
-            <div id="checksumError" style="display:none; margin: 10px 0; padding: 12px; background: #fff3cd; border: 2px solid #ffc107; border-radius: 6px; color: #856404;">
-                <strong>⚠️ 校验和不匹配</strong>
-                <p style="margin: 5px 0 0 0; font-size: 13px;">文件数据可能损坏。您仍可尝试下载，但文件可能无法正常使用。</p>
-            </div>
-            <button class="btn" id="downloadBtn" onclick="triggerFileDownload()" style="width: 100%; background: #4CAF50; font-size: 16px;">⬇️ 下载文件</button>
-        </div>
 
-        <div id="status"></div>
+            <button class="btn" onclick="stopScan()" style="background:var(--error);" data-zh="⏹️ 停止扫描" data-en="⏹️ Stop">⏹️ 停止扫描</button>
+        </div>
+    </div>
+
+    <!-- State 3: Complete -->
+    <div id="state-complete" class="state-container" style="display:none;">
+        <div class="section">
+            <h2 style="color:var(--success); margin-bottom:15px;"><span data-zh="✅ 传输完成" data-en="✅ Transfer Complete"></span></h2>
+
+            <!-- Text result -->
+            <div id="chunksList" style="display:none; margin-bottom:10px;">
+                <small style="color:var(--text-secondary);" data-zh="已接收片段：" data-en="Received fragments:">已接收片段：</small>
+                <div id="chunksPreview" style="font-family:monospace; font-size:12px; background:var(--bg-input); padding:5px; border-radius:8px; margin-top:5px;"></div>
+            </div>
+            <div id="output">等待扫描...</div>
+            <button class="btn" id="copyBtn" onclick="copyResult()" style="display:none; margin-top:10px; background:var(--accent);" data-zh="📋 复制数据" data-en="📋 Copy">📋 复制数据</button>
+
+            <!-- File result -->
+            <div id="file-download-section" style="display:none; margin-top:20px; padding:20px; background:rgba(48,209,88,0.06); border-radius:12px; border:1px solid var(--success);">
+                <h3 style="margin:0 0 15px 0; color:var(--success);"><span data-zh="📁 文件已接收" data-en="📁 File Received"></span></h3>
+                <div style="margin-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+                        <span style="color:var(--text-secondary);" data-zh="文件名:" data-en="Name:">文件名:</span>
+                        <span id="downloadFileName" style="font-weight:bold;"></span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+                        <span style="color:var(--text-secondary);" data-zh="文件大小:" data-en="Size:">文件大小:</span>
+                        <span id="downloadFileSize" style="font-weight:bold;"></span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+                        <span style="color:var(--text-secondary);" data-zh="文件类型:" data-en="Type:">文件类型:</span>
+                        <span id="downloadFileType" style="font-weight:bold;"></span>
+                    </div>
+                    <div id="fileProgress" style="margin-top:10px; font-size:14px; color:var(--text-secondary);">
+                        <span data-zh="已接收:" data-en="Received:">已接收:</span> <span id="fileProgressText">0 / 0</span>
+                    </div>
+                </div>
+                <div id="checksumError" style="display:none; margin:10px 0; padding:12px; background:rgba(255,159,10,0.08); border:1px solid var(--warning); border-radius:8px; color:var(--warning);">
+                    <strong data-zh="⚠️ 校验和不匹配" data-en="⚠️ Checksum Mismatch">⚠️ 校验和不匹配</strong>
+                    <p style="margin:5px 0 0 0; font-size:13px;" data-zh="文件数据可能损坏。您仍可尝试下载，但文件可能无法正常使用。" data-en="File may be corrupted. You can still try downloading, but it may not work properly.">文件数据可能损坏。您仍可尝试下载，但文件可能无法正常使用。</p>
+                </div>
+                <button class="btn" id="downloadBtn" onclick="triggerFileDownload()" style="width:100%; background:var(--success); font-size:16px;" data-zh="⬇️ 下载文件" data-en="⬇️ Download File">⬇️ 下载文件</button>
+            </div>
+
+            <div id="status"></div>
+
+            <button class="btn" id="scanNewBtn" onclick="resetToReady()" style="margin-top:15px; background:var(--bg-card-hover); border:1px solid var(--border);" data-zh="🔄 重新扫描" data-en="🔄 Scan New">🔄 重新扫描</button>
+        </div>
     </div>
 </div>
 
@@ -10571,6 +10470,81 @@ let chunks = {};
 let scanning = false;
 let totalChunks = 0;
 let scanningStartTime = Date.now();
+let currentUIState = 'ready';
+let hasReceivedFirstFragment = false;
+
+// ===== State Management =====
+function setState(state) {
+    currentUIState = state;
+    var states = ['recovery', 'ready', 'aiming', 'receiving', 'complete'];
+    states.forEach(function(s) {
+        var el = document.getElementById('state-' + s);
+        if (el) el.style.display = (s === state) ? 'block' : 'none';
+    });
+
+    // Move video element to appropriate container
+    var videoEl = document.getElementById('video');
+    if (videoEl) {
+        if (state === 'aiming') {
+            var aimingContainer = document.querySelector('#state-aiming .video-container');
+            if (aimingContainer && videoEl.parentNode !== aimingContainer) {
+                aimingContainer.appendChild(videoEl);
+            }
+        } else if (state === 'receiving') {
+            var recvContainer = document.querySelector('#state-receiving .video-container');
+            if (recvContainer && videoEl.parentNode !== recvContainer) {
+                recvContainer.appendChild(videoEl);
+            }
+        }
+    }
+
+    console.log('UI State → ' + state);
+}
+
+function updateProgressBar(received, total) {
+    if (total <= 0) return;
+    var pct = Math.round((received / total) * 100);
+    var fill = document.getElementById('progress-bar-fill');
+    var pctEl = document.getElementById('progress-percent');
+    var fracEl = document.getElementById('progress-fraction');
+    if (fill) fill.style.width = pct + '%';
+    if (pctEl) pctEl.textContent = pct + '%';
+    if (fracEl) fracEl.textContent = received + ' / ' + total;
+}
+
+function resetToReady() {
+    // Stop scan if running
+    if (scanning) {
+        scanning = false;
+        if (video && video.srcObject) {
+            video.srcObject.getTracks().forEach(function(track) { track.stop(); });
+        }
+    }
+
+    // Clear all state
+    clearSession();
+    currentSession = null;
+    chunks = {};
+    totalChunks = 0;
+    fileFragments = {};
+    fileMetadata = null;
+    fileTotalFragments = 0;
+    hasReceivedFirstFragment = false;
+
+    // Reset UI elements
+    document.getElementById('output').textContent = '等待扫描...';
+    var chunksList = document.getElementById('chunksList');
+    if (chunksList) { chunksList.style.display = 'none'; chunksList.innerHTML = ''; }
+    document.getElementById('file-download-section').style.display = 'none';
+    document.getElementById('copyBtn').style.display = 'none';
+    document.getElementById('checksumError').style.display = 'none';
+    var progMap = document.getElementById('progressMapContainer');
+    if (progMap) progMap.style.display = 'none';
+    updateProgressBar(0, 1);
+
+    setState('ready');
+    console.log('Reset to ready state');
+}
 
 async function startScan() {
     video = document.getElementById('video');
@@ -10581,7 +10555,11 @@ async function startScan() {
     chunks = {};
     totalChunks = 0;
     scanningStartTime = Date.now();
-    
+    hasReceivedFirstFragment = false;
+
+    // Switch to aiming state
+    setState('aiming');
+
     // 更新UI状态
     document.getElementById('scanBtn').style.display = 'none';
     document.getElementById('stopBtn').style.display = 'block';
@@ -10663,6 +10641,10 @@ function stopScan() {
     }
     resetScanUI();
     updateScanProgress('⏹️ 扫描已停止', Object.keys(chunks).length, totalChunks);
+    // If no fragments received and not completing, go back to ready
+    if (!hasReceivedFirstFragment && currentUIState !== 'complete') {
+        setState('ready');
+    }
 }
 
 function resetScanUI() {
@@ -10771,6 +10753,7 @@ function handleTextFragment(data) {
 
     updateOutput();
     updateScanProgress('🔍 扫描中...', Object.keys(chunks).length, totalChunks);
+    updateProgressBar(Object.keys(chunks).length, totalChunks);
 
     // 播放提示音（如果支持）
     try {
@@ -10807,6 +10790,7 @@ function handleTextFragment(data) {
 
         scanning = false;
         stopScan();
+        setState('complete');
     }
 }
 
@@ -10880,6 +10864,7 @@ function handleFileFragment(fragment) {
     
     // FIX: Also update the main scan progress indicator so the user sees progress in the camera view overlay
     updateScanProgress(`📁 接收文件中: ${receivedCount}/${fragment.total}`, receivedCount, fragment.total);
+    updateProgressBar(receivedCount, fragment.total);
 
     // 播放提示音
     try {
@@ -10937,6 +10922,7 @@ function completeFileTransfer() {
     // 停止扫描
     scanning = false;
     stopScan();
+    setState('complete');
 
     // 自动触发下载（可选）
     // triggerFileDownload();
@@ -11119,6 +11105,18 @@ function checkSessionRecovery() {
     if (session && !isSessionExpired(session)) {
         currentSession = session;
         showRecoveryBanner(session);
+        // Show recovery state with details
+        var detail = document.getElementById('recovery-detail');
+        if (detail) {
+            var cnt = Object.keys(session.receivedFragments).length;
+            var tot = session.totalFragments;
+            if (session.type === 'file' && session.metadata) {
+                detail.textContent = session.metadata.fileName + ' — ' + cnt + '/' + tot + ' 片';
+            } else {
+                detail.textContent = '已接收 ' + cnt + '/' + tot + ' 片';
+            }
+        }
+        setState('recovery');
     } else {
         console.log('无可恢复的会话');
     }
@@ -11156,6 +11154,9 @@ function continueSession() {
     banner.style.display = 'none';
     document.body.classList.remove('has-recovery-banner');
 
+    // Restore state and start scanning
+    hasReceivedFirstFragment = true;
+
     // 恢复UI状态
     if (currentSession) {
         const receivedCount = Object.keys(currentSession.receivedFragments).length;
@@ -11183,34 +11184,16 @@ function continueSession() {
 
         console.log('会话已恢复，继续传输');
     }
+
+    // Start scanning to continue receiving
+    startScan();
 }
 
 // T025: 清除并重新开始
 function clearAndRestart() {
-    const banner = document.getElementById('recovery-banner');
-    banner.style.display = 'none';
     document.body.classList.remove('has-recovery-banner');
-
-    // 清除会话
-    clearSession();
-    currentSession = null;
-
-    // 重置全局变量
-    chunks = {};
-    totalChunks = 0;
-    fileFragments = {};
-    fileMetadata = null;
-    fileTotalFragments = 0;
-
-    // 重置UI
-    document.getElementById('output').textContent = '等待扫描...';
-    document.getElementById('chunksList').innerHTML = '';
-    document.getElementById('file-download-section').style.display = 'none';
-
+    resetToReady();
     console.log('会话已清除，重新开始');
-
-    // 可选：自动启动扫描
-    // startScan();
 }
 
 // 格式化字节大小
@@ -11306,6 +11289,11 @@ function scan() {
         
         if (code) {
             console.log('检测到QR码:', code.data);
+            // Transition to receiving state on first detection
+            if (!hasReceivedFirstFragment) {
+                hasReceivedFirstFragment = true;
+                setState('receiving');
+            }
             try {
                 const data = JSON.parse(code.data);
 
@@ -11365,8 +11353,8 @@ function updateOutput() {
                     padding: 2px 6px; 
                     border-radius: 3px; 
                     font-size: 11px;
-                    background: ${received ? '#d4edda' : '#f8d7da'}; 
-                    color: ${received ? '#155724' : '#721c24'};
+                    background: ${received ? 'rgba(48,209,88,0.15)' : 'rgba(255,69,58,0.15)'};
+                    color: ${received ? 'var(--success)' : 'var(--error)'};
                 ">${num}</span>`;
             }).join('');
         }
@@ -11379,7 +11367,7 @@ function updateOutput() {
         if (preview) {
             const truncatedPreview = preview.length > 200 ? preview.substring(0, 200) + '...' : preview;
             document.getElementById('output').innerHTML = `
-                <div style="color: #666; font-size: 12px; margin-bottom: 8px;">实时预览 (${preview.length}字符):</div>
+                <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: 8px;">实时预览 (${preview.length}字符):</div>
                 <div>${truncatedPreview}</div>
             `;
         }
@@ -11412,6 +11400,36 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('页面加载完成，检查会话恢复...');
     checkSessionRecovery();
 });
+
+// ===== Bilingual Support =====
+(function() {
+    var stored = null;
+    try { stored = localStorage.getItem('qr_lang'); } catch(e) {}
+    var lang = stored || ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
+
+    function applyLang(l) {
+        lang = l;
+        try { localStorage.setItem('qr_lang', l); } catch(e) {}
+        document.querySelectorAll('[data-zh]').forEach(function(el) {
+            el.textContent = el.getAttribute('data-' + l) || el.getAttribute('data-en');
+        });
+        document.querySelectorAll('#langToggle button').forEach(function(btn) {
+            btn.classList.toggle('active', btn.getAttribute('data-lang') === l);
+        });
+        document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en';
+    }
+
+    var toggle = document.getElementById('langToggle');
+    if (toggle) {
+        toggle.addEventListener('click', function(e) {
+            if (e.target.tagName === 'BUTTON') {
+                applyLang(e.target.getAttribute('data-lang'));
+            }
+        });
+    }
+
+    applyLang(lang);
+})();
 </script>
 </body>
 </html>
