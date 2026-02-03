@@ -279,6 +279,16 @@ details summary:hover { color: var(--text-primary); }
                 <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">
                     提示：可设置循环范围，如 4-50 表示只循环第4片到第50片
                 </div>
+                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 500;" data-zh="补传码：" data-en="Retransmit Code:">补传码：</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="text" id="retransmitCodeInput" placeholder="2q25292h"
+                               style="flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text-primary); font-family: monospace; letter-spacing: 1px;">
+                        <button onclick="applyRetransmitCode()" style="padding: 6px 14px; background: var(--accent); color: #fff; border: none; border-radius: 980px; cursor: pointer; white-space: nowrap;" data-zh="应用" data-en="Apply">应用</button>
+                        <button onclick="clearRetransmitCode()" style="padding: 6px 14px; background: var(--bg-card-hover); color: var(--text-primary); border: 1px solid var(--border); border-radius: 980px; cursor: pointer; white-space: nowrap;" data-zh="清除" data-en="Clear">清除</button>
+                    </div>
+                    <div id="retransmitStatus" style="margin-top: 6px; font-size: 12px; color: var(--text-muted);" data-zh="输入接收端补传码，只循环缺失片段" data-en="Enter receiver retransmit code to loop only missing fragments">输入接收端补传码，只循环缺失片段</div>
+                </div>
             </div>
         </div>
     </div>
@@ -841,7 +851,7 @@ function calculateSimpleChecksum(data) {
 function generatePrivateQRCodes(fragments) {
     const display = document.getElementById('qrDisplay');
     display.innerHTML = '';
-    qrCodes = []; qrCache = {}; // Reset QR codes and cache
+    qrCodes = []; qrCache = {}; retransmitIndices = null; // Reset QR codes, cache, and retransmit
 
     fragments.forEach((fragment, index) => {
         const container = document.createElement('div');
@@ -1289,24 +1299,40 @@ function handleSingleModeKeys(e) {
 
 function startLoop() {
     if (qrCodes.length === 0) return;
-    
+
     stopLoop(); // 清除之前的定时器
 
-    // 设置循环起始位置（转换为0基索引）
-    currentIndex = Math.max(0, loopStart - 1);
-    showQRCode(currentIndex);
-    updateLoopDisplay();
-
-    // 根据用户设置的速度切换，只在指定范围内循环
-    loopInterval = setInterval(() => {
-        currentIndex++;
-        // 如果超过结束位置，回到起始位置
-        if (currentIndex >= loopEnd) {
-            currentIndex = loopStart - 1; // 转换为0基索引
-        }
+    if (retransmitIndices && retransmitIndices.length > 0) {
+        // 补传模式：只循环指定索引
+        var rtPos = 0;
+        currentIndex = retransmitIndices[0];
         showQRCode(currentIndex);
         updateLoopDisplay();
-    }, loopSpeed);
+
+        loopInterval = setInterval(() => {
+            rtPos = (rtPos + 1) % retransmitIndices.length;
+            currentIndex = retransmitIndices[rtPos];
+            showQRCode(currentIndex);
+            updateLoopDisplay();
+        }, loopSpeed);
+    } else {
+        // 正常模式
+        // 设置循环起始位置（转换为0基索引）
+        currentIndex = Math.max(0, loopStart - 1);
+        showQRCode(currentIndex);
+        updateLoopDisplay();
+
+        // 根据用户设置的速度切换，只在指定范围内循环
+        loopInterval = setInterval(() => {
+            currentIndex++;
+            // 如果超过结束位置，回到起始位置
+            if (currentIndex >= loopEnd) {
+                currentIndex = loopStart - 1; // 转换为0基索引
+            }
+            showQRCode(currentIndex);
+            updateLoopDisplay();
+        }, loopSpeed);
+    }
 }
 
 // Special update for loop mode (inline)
@@ -1462,6 +1488,48 @@ function updateLoopSpeed() {
 let isPaused = false;
 let loopStart = 1;
 let loopEnd = 1;
+let retransmitIndices = null; // 0-based indices for retransmit mode, null = normal mode
+
+// ===== Retransmit Code Decoding (Base31) =====
+var RT_CHARSET = '23456789abcdefghjkmnpqrstuvwxyz'; // 31 chars, excludes 0,1,i,l,o
+
+function rtGetWidth(total) {
+    var w = 2;
+    while (Math.pow(31, w) <= total) w++;
+    return w;
+}
+
+function rtFromBaseN(code, offset, w) {
+    var n = 0;
+    for (var i = 0; i < w; i++) {
+        if (offset + i >= code.length) return -1;
+        var idx = RT_CHARSET.indexOf(code[offset + i]);
+        if (idx < 0) return -1;
+        n = n * 31 + idx;
+    }
+    return n;
+}
+
+function decodeRetransmit(code, expectedTotal) {
+    code = code.toLowerCase().replace(/\s/g, '');
+    if (code.length < 4) return null;
+
+    // Use known total to determine width (eliminates ambiguity)
+    var w = rtGetWidth(expectedTotal);
+    if (code.length % w !== 0 || code.length < w * 2) return null;
+
+    var total = rtFromBaseN(code, 0, w);
+    if (total !== expectedTotal) return null;
+
+    var missing = [];
+    for (var i = w; i < code.length; i += w) {
+        var idx = rtFromBaseN(code, i, w);
+        if (idx < 1 || idx > total) return null;
+        missing.push(idx);
+    }
+    if (missing.length === 0) return null;
+    return { total: total, missing: missing };
+}
 
 // 暂停/恢复循环播放
 function togglePause() {
@@ -1525,25 +1593,100 @@ function updateLoopRange() {
 // 重置循环范围到全部
 function resetLoopRange() {
     if (qrCodes.length === 0) return;
-    
+
     document.getElementById('loopStart').value = 1;
     document.getElementById('loopEnd').value = qrCodes.length;
-    
+
     loopStart = 1;
     loopEnd = qrCodes.length;
-    
+    retransmitIndices = null;
+    var rtInput = document.getElementById('retransmitCodeInput');
+    if (rtInput) rtInput.value = '';
+    var rtStatus = document.getElementById('retransmitStatus');
+    if (rtStatus) {
+        var lang = (document.documentElement.lang || 'zh').startsWith('zh') ? 'zh' : 'en';
+        rtStatus.textContent = lang === 'zh' ? '输入接收端补传码，只循环缺失片段' : 'Enter receiver retransmit code to loop only missing fragments';
+        rtStatus.style.color = 'var(--text-muted)';
+    }
+
     // 如果当前正在循环播放，重启循环
     if (mode === 'loop' && !isPaused) {
         stopLoop();
         startLoop();
     }
-    
+
     console.log(`循环范围已重置: 第1片 到 第${qrCodes.length}片`);
+}
+
+// 应用补传码
+function applyRetransmitCode() {
+    var input = document.getElementById('retransmitCodeInput');
+    var statusEl = document.getElementById('retransmitStatus');
+    var code = input ? input.value.trim() : '';
+    var lang = (document.documentElement.lang || 'zh').startsWith('zh') ? 'zh' : 'en';
+
+    if (!code) {
+        if (statusEl) {
+            statusEl.textContent = lang === 'zh' ? '请输入补传码' : 'Please enter a retransmit code';
+            statusEl.style.color = 'var(--error)';
+        }
+        return;
+    }
+
+    var result = decodeRetransmit(code, qrCodes.length);
+    if (!result) {
+        if (statusEl) {
+            statusEl.textContent = lang === 'zh' ? '无效补传码，请检查输入（总片数须匹配）' : 'Invalid code (total must match)';
+            statusEl.style.color = 'var(--error)';
+        }
+        return;
+    }
+
+    // Convert 1-based missing indices to 0-based
+    retransmitIndices = result.missing.map(function(idx) { return idx - 1; });
+
+    if (statusEl) {
+        statusEl.textContent = lang === 'zh'
+            ? '补传模式：循环 ' + retransmitIndices.length + ' 片缺失片段'
+            : 'Retransmit: looping ' + retransmitIndices.length + ' missing fragments';
+        statusEl.style.color = 'var(--success)';
+    }
+
+    // Restart loop in retransmit mode
+    if (mode === 'loop') {
+        stopLoop();
+        startLoop();
+    }
+}
+
+// 清除补传码
+function clearRetransmitCode() {
+    retransmitIndices = null;
+    var input = document.getElementById('retransmitCodeInput');
+    if (input) input.value = '';
+    var statusEl = document.getElementById('retransmitStatus');
+    var lang = (document.documentElement.lang || 'zh').startsWith('zh') ? 'zh' : 'en';
+    if (statusEl) {
+        statusEl.textContent = lang === 'zh' ? '已清除补传码，恢复正常循环' : 'Retransmit cleared, normal loop restored';
+        statusEl.style.color = 'var(--text-muted)';
+    }
+
+    // Restart normal loop
+    if (mode === 'loop' && !isPaused) {
+        stopLoop();
+        startLoop();
+    }
 }
 
 // 更新循环显示信息
 function updateLoopDisplay() {
-    const indexText = qrCodes.length > 0 ? `${currentIndex + 1} / ${qrCodes.length}` : '0 / 0';
+    var indexText;
+    if (retransmitIndices && retransmitIndices.length > 0) {
+        var rtPos = retransmitIndices.indexOf(currentIndex);
+        indexText = `补传 ${rtPos + 1}/${retransmitIndices.length} (第${currentIndex + 1}片)`;
+    } else {
+        indexText = qrCodes.length > 0 ? `${currentIndex + 1} / ${qrCodes.length}` : '0 / 0';
+    }
     const loopQrIndex = document.getElementById('loopQrIndex');
     if (loopQrIndex) loopQrIndex.textContent = indexText;
     const fsLoopIndex = document.getElementById('fsLoopIndex');
@@ -1587,6 +1730,6 @@ function updateLoopDisplay() {
 <div style="text-align:center; padding:20px 0 12px; font-size:11px; color:var(--text-muted);">
     <span data-zh="最后更新" data-en="Last updated">最后更新</span>: <span id="buildTime"></span>
 </div>
-<script>document.getElementById('buildTime').textContent=new Date('2026-02-03T05:58:00Z').toLocaleString();</script>
+<script>document.getElementById('buildTime').textContent=new Date('2026-02-03T08:30:00Z').toLocaleString();</script>
 </body>
 </html>
