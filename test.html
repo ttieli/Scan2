@@ -1,370 +1,109 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QR接收端 - 完全离线版</title>
-<style>
-:root {
-    --bg-primary: #000000;
-    --bg-card: #1c1c1e;
-    --bg-card-hover: #2c2c2e;
-    --bg-input: #1c1c1e;
-    --accent: #0071e3;
-    --accent-hover: #0077ED;
-    --accent-subtle: rgba(0,113,227,0.12);
-    --text-primary: #f5f5f7;
-    --text-secondary: #86868b;
-    --text-muted: #6e6e73;
-    --border: #38383a;
-    --border-light: #48484a;
-    --success: #30d158;
-    --warning: #ff9f0a;
-    --error: #ff453a;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
-    margin: 0; padding: 12px;
-    background: var(--bg-primary); color: var(--text-primary);
-    -webkit-text-size-adjust: 100%;
-}
-.container { max-width: 800px; margin: 0 auto; }
-.section {
-    background: var(--bg-card); padding: 20px; margin-bottom: 20px;
-    border-radius: 16px;
-}
-.btn {
-    background: var(--accent); color: #fff; border: none;
-    padding: 14px 28px; border-radius: 980px; cursor: pointer;
-    font-size: 16px; font-weight: 500; width: 100%; margin-bottom: 10px;
-    transition: background-color 0.2s; letter-spacing: -0.01em;
-}
-.btn:hover { background: var(--accent-hover); }
-.btn:active { opacity: 0.85; }
-
-.video-container {
-    position: relative; width: 100%; max-width: 320px;
-    margin: 10px auto; overflow: hidden; border-radius: 16px;
-}
-#video {
-    width: 100%; height: auto; display: block;
-    background: #000; object-fit: cover; transition: all 0.3s ease;
-}
-@supports (-webkit-touch-callout: none) {
-    #video { width: 100% !important; height: auto !important; }
-    .video-container { max-width: 320px; max-height: 240px; aspect-ratio: 4/3; }
-}
-#video.hidden { display: none !important; }
-#video.minimized { max-width: 200px; max-height: 150px; opacity: 0.8; }
-
-.video-controls { display: flex; gap: 10px; margin: 10px 0; align-items: center; flex-wrap: wrap; }
-.video-controls button {
-    background: var(--bg-card-hover); color: var(--text-primary);
-    border: 1px solid var(--border); padding: 6px 12px; border-radius: 8px;
-    font-size: 12px; cursor: pointer; flex: 1; min-width: 80px;
-}
-.video-controls button:active { background: var(--bg-input); }
-
-#output {
-    background: var(--bg-input); padding: 15px; border-radius: 12px;
-    min-height: 80px; margin-top: 10px; font-family: monospace;
-    font-size: 14px; line-height: 1.4; word-wrap: break-word;
-    color: var(--text-primary);
-}
-#status {
-    margin-top: 10px; padding: 10px;
-    background: var(--accent-subtle); border-radius: 12px;
-    border-left: 4px solid var(--accent);
-    color: var(--accent); font-size: 14px; font-weight: 500;
-}
-.progress-indicator {
-    display: flex; justify-content: space-between; align-items: center;
-    background: rgba(255,159,10,0.08); padding: 10px; border-radius: 12px;
-    border-left: 4px solid var(--warning); margin-top: 10px;
-    font-size: 14px; color: var(--warning);
-}
-.scanning-indicator {
-    background: var(--accent-subtle);
-    border-left-color: var(--accent); color: var(--accent);
-}
-.success-indicator {
-    background: rgba(48,209,88,0.08);
-    border-left-color: var(--success); color: var(--success);
-}
-
-/* Mobile */
-@media (max-width: 768px) {
-    body { padding: 6px; }
-    .section { padding: 16px; margin-bottom: 12px; }
-    .video-container { max-width: 280px; }
-    @supports (-webkit-touch-callout: none) {
-        .video-container { max-width: 280px; max-height: 210px; }
-    }
-    #video.minimized { max-width: 150px; max-height: 112px; }
-    .btn { padding: 14px 20px; font-size: 16px; }
-    .video-controls button { font-size: 11px; padding: 5px 8px; }
-}
-@media (max-width: 480px) {
-    .video-container { max-width: 240px; }
-    @supports (-webkit-touch-callout: none) {
-        .video-container { max-width: 240px; max-height: 180px; }
-    }
-    #video.minimized { max-width: 120px; max-height: 90px; }
-}
-
-/* Recovery banner (legacy, kept hidden) */
-.recovery-banner {
-    position: fixed; top: 0; left: 0; right: 0;
-    background: var(--bg-card); color: var(--text-primary);
-    padding: 15px 20px; display: flex; justify-content: space-between;
-    align-items: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    z-index: 9999; border-bottom: 2px solid var(--warning);
-    animation: slideDown 0.3s ease-out;
-}
-@keyframes slideDown {
-    from { transform: translateY(-100%); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-}
-.recovery-banner .message { flex: 1; font-size: 14px; font-weight: 500; }
-.recovery-banner .message strong { font-weight: 600; color: var(--warning); }
-.recovery-banner .actions { display: flex; gap: 10px; }
-.recovery-banner button {
-    background: var(--bg-input); border: 1px solid var(--warning);
-    color: var(--warning); padding: 8px 16px; border-radius: 980px;
-    font-size: 13px; font-weight: 600; cursor: pointer; transition: background-color 0.2s, color 0.2s;
-}
-.recovery-banner button:hover { background: var(--warning); color: var(--bg-primary); }
-.recovery-banner button.danger { border-color: var(--error); color: var(--error); }
-.recovery-banner button.danger:hover { background: var(--error); color: #fff; }
-body.has-recovery-banner { padding-top: 70px; }
-
-/* Progress Map */
-.progress-map {
-    margin-top: 8px; padding: 10px;
-    background: var(--bg-input); border-radius: 12px;
-    max-height: 280px; overflow-y: auto; overflow-x: hidden;
-}
-.progress-map-title {
-    font-size: 14px; font-weight: 600; margin-bottom: 5px;
-    color: var(--text-secondary); display: flex;
-    justify-content: space-between; align-items: center;
-}
-.progress-grid {
-    display: grid;
-    grid-template-columns: 28px repeat(10, 1fr);
-    gap: 2px; width: 100%;
-}
-.grid-header {
-    font-size: 10px; color: var(--text-muted);
-    text-align: center; padding: 2px 0;
-    font-weight: 600; user-select: none;
-}
-.grid-rowlabel {
-    font-size: 10px; color: var(--text-muted);
-    text-align: right; padding-right: 4px;
-    display: flex; align-items: center;
-    justify-content: flex-end;
-    font-weight: 600; user-select: none;
-}
-.map-item {
-    aspect-ratio: 1; background: var(--border-light);
-    border-radius: 2px; transition: background-color 0.2s;
-}
-.map-item.received { background: var(--success); }
-@keyframes scanFlash {
-    0% { background: var(--warning); transform: scale(1.6); }
-    100% { transform: scale(1); }
-}
-.map-item.just-scanned {
-    animation: scanFlash 0.5s ease-out;
-    z-index: 1; position: relative;
-}
-.map-item.last-scanned-marker {
-    outline: 2px solid var(--warning);
-    outline-offset: 1px;
-}
-.map-legend {
-    display: flex; gap: 15px; font-size: 11px;
-    color: var(--text-muted); margin-top: 5px;
-}
-.legend-item { display: flex; align-items: center; gap: 4px; }
-.legend-box { width: 10px; height: 10px; border-radius: 2px; }
-
-.video-small { max-width: 160px; margin: 0 auto 15px; }
-/* Top Nav */
-.top-nav { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:rgba(0,0,0,0.85); border-bottom:1px solid var(--border); }
-.top-nav a.nav-logo { color:var(--text-primary); text-decoration:none; font-weight:600; font-size:1rem; letter-spacing:-0.01em; }
-.top-nav .nav-links { display:flex; gap:4px; }
-.top-nav .nav-links a { padding:6px 16px; border-radius:980px; text-decoration:none; font-size:0.85rem; color:var(--text-secondary); transition:color 0.2s, background-color 0.2s; }
-.top-nav .nav-links a:hover { color:var(--text-primary); background:rgba(255,255,255,0.08); }
-.top-nav .nav-links a.active-send { color:#fff; background:var(--accent); }
-.top-nav .nav-links a.active-recv { color:#fff; background:var(--accent); }
-.top-nav .nav-lang { display:flex; gap:2px; background:rgba(255,255,255,0.06); border-radius:980px; padding:2px; }
-.top-nav .nav-lang button { background:none; border:none; color:var(--text-muted); padding:4px 12px; border-radius:980px; font-size:0.75rem; cursor:pointer; transition:background-color 0.2s, color 0.2s; }
-.top-nav .nav-lang button.active { background:var(--accent); color:#fff; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Transfer — Automated Test</title>
+    <style>
+        :root {
+            --bg-primary: #000000;
+            --bg-card: #1c1c1e;
+            --bg-card-hover: #2c2c2e;
+            --accent: #0071e3;
+            --text-primary: #f5f5f7;
+            --text-secondary: #86868b;
+            --text-muted: #6e6e73;
+            --border: #38383a;
+            --success: #30d158;
+            --error: #ff453a;
+            --warning: #ffd60a;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 32px;
+        }
+        .container { max-width: 700px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .header h1 { font-size: 1.8rem; font-weight: 600; letter-spacing: -0.03em; margin-bottom: 8px; }
+        .header p { color: var(--text-secondary); font-size: 0.95rem; }
+        .btn {
+            padding: 10px 28px; border: none; border-radius: 980px; cursor: pointer;
+            font-size: 0.95rem; font-weight: 500; transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+        .controls { text-align: center; margin-bottom: 32px; }
+        .test-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 32px; }
+        .test-row {
+            background: var(--bg-card); border-radius: 12px; padding: 16px 20px;
+            display: flex; align-items: center; gap: 14px;
+        }
+        .test-icon { font-size: 1.2rem; width: 28px; text-align: center; flex-shrink: 0; }
+        .test-name { flex: 1; font-size: 0.9rem; font-weight: 500; }
+        .test-detail { color: var(--text-muted); font-size: 0.8rem; text-align: right; }
+        .test-detail.pass { color: var(--success); }
+        .test-detail.fail { color: var(--error); }
+        .summary {
+            text-align: center; padding: 20px; background: var(--bg-card);
+            border-radius: 12px; font-size: 1rem; font-weight: 600; display: none;
+        }
+        .summary.pass { color: var(--success); }
+        .summary.fail { color: var(--error); }
+        .log-area {
+            margin-top: 24px; background: var(--bg-card); border-radius: 12px;
+            padding: 16px; max-height: 300px; overflow-y: auto; font-family: monospace;
+            font-size: 0.78rem; color: var(--text-muted); line-height: 1.6; display: none;
+        }
+        .log-area .err { color: var(--error); }
+        .log-area .ok { color: var(--success); }
+        .log-area .warn { color: var(--warning); }
+        /* Hidden container for QR generation */
+        #qrWorkspace { position: absolute; left: -9999px; top: -9999px; }
+        /* Top Nav */
+        .top-nav { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:rgba(0,0,0,0.85); border-bottom:1px solid var(--border); position:fixed; top:0; left:0; right:0; z-index:100; }
+        .top-nav a.nav-logo { color:var(--text-primary); text-decoration:none; font-weight:600; font-size:1rem; }
+        .top-nav .nav-links { display:flex; gap:4px; }
+        .top-nav .nav-links a { padding:6px 16px; border-radius:980px; text-decoration:none; font-size:0.85rem; color:var(--text-secondary); transition:color 0.2s, background-color 0.2s; }
+        .top-nav .nav-links a:hover { color:var(--text-primary); background:rgba(255,255,255,0.08); }
+        .top-nav .nav-links a.active { color:#fff; background:var(--accent); }
+    </style>
 </head>
 <body>
-<nav class="top-nav" id="topNav">
-    <a class="nav-logo" href="index.html">QR Transfer</a>
-    <div class="nav-links">
-        <a href="sender.html" data-zh="发送" data-en="Sender">发送</a>
-        <a href="receiver.html" class="active-recv" data-zh="接收" data-en="Receiver">接收</a>
-    </div>
-    <div class="nav-lang" id="langToggle">
-        <button data-lang="zh">中文</button>
-        <button data-lang="en">EN</button>
-    </div>
-</nav>
-<!-- Old recovery banner kept hidden for ID compat -->
-<div id="recovery-banner" class="recovery-banner" style="display:none !important;">
-    <div class="message"><span id="recovery-message"></span></div>
-    <div class="actions">
-        <button onclick="continueSession()">继续传输</button>
-        <button class="danger" onclick="clearAndRestart()">重新开始</button>
-    </div>
-</div>
-
-<!-- Hidden video controls for ID compat -->
-<div id="videoControls" style="display:none !important;">
-    <button onclick="toggleVideo()">👁️</button>
-    <button onclick="minimizeVideo()">📱</button>
-    <button onclick="normalizeVideo()">📺</button>
-</div>
-
-<div class="container">
-    <!-- State 0: Recovery -->
-    <div id="state-recovery" class="state-container" style="display:none;">
-        <div class="section" style="border-left: 4px solid var(--warning);">
-            <h2><span data-zh="🔄 检测到未完成的传输" data-en="🔄 Unfinished Transfer Detected"></span></h2>
-            <p id="recovery-detail" style="margin: 10px 0; color: var(--text-secondary);"></p>
-            <div style="display:flex; gap:10px; margin-top:15px;">
-                <button class="btn" onclick="continueSession()" style="flex:1;" data-zh="继续传输" data-en="Resume">继续传输</button>
-                <button class="btn" onclick="clearAndRestart()" style="flex:1; background:var(--error);" data-zh="重新开始" data-en="Start Fresh">重新开始</button>
-            </div>
+    <nav class="top-nav">
+        <a class="nav-logo" href="index.html">QR Transfer</a>
+        <div class="nav-links">
+            <a href="sender.html">发送</a>
+            <a href="receiver.html">接收</a>
+            <a href="test.html" class="active">测试</a>
         </div>
-    </div>
+    </nav>
 
-    <!-- State 1: Ready -->
-    <div id="state-ready" class="state-container">
-        <div class="section" style="text-align:center; padding:80px 24px;">
-            <h1 style="margin-bottom:20px;"><span data-zh="📥 QR 接收端" data-en="📥 QR Receiver"></span></h1>
-            <p style="color:var(--text-secondary); margin-bottom:30px;"><span data-zh="扫描二维码接收数据" data-en="Scan QR codes to receive data"></span></p>
-            <button class="btn" id="scanBtn" onclick="startScan()" style="max-width:300px; margin:0 auto; font-size:18px; padding:18px 32px;" data-zh="🎥 启动摄像头" data-en="🎥 Start Camera">🎥 启动摄像头</button>
+    <div class="container" style="padding-top: 56px;">
+        <div class="header">
+            <h1>Automated E2E Test</h1>
+            <p>编码 → QR生成 → QR解码 → 重组 → 校验（跳过摄像头）</p>
         </div>
-    </div>
 
-    <!-- State 2A: Aiming -->
-    <div id="state-aiming" class="state-container" style="display:none;">
-        <div class="section">
-            <div class="video-container" style="max-width:320px; margin:0 auto;">
-                <video id="video" playsinline webkit-playsinline muted autoplay style="display:none;"></video>
-            </div>
-            <canvas id="canvas" style="display:none;"></canvas>
-            <p id="aiming-hint" style="text-align:center; margin-top:15px; font-size:16px; color:var(--text-secondary);" data-zh="请将摄像头对准二维码" data-en="Point camera at QR code">请将摄像头对准二维码</p>
-            <button class="btn" id="stopBtn" onclick="stopScan()" style="background:var(--error); margin-top:15px;" data-zh="⏹️ 停止扫描" data-en="⏹️ Stop">⏹️ 停止扫描</button>
+        <div class="controls">
+            <button class="btn btn-primary" id="runBtn" onclick="runAllTests()">▶ 运行全部测试</button>
         </div>
+
+        <div class="test-list" id="testList"></div>
+        <div class="summary" id="summary"></div>
+        <div class="log-area" id="logArea"></div>
     </div>
 
-    <!-- State 2B: Receiving -->
-    <div id="state-receiving" class="state-container" style="display:none;">
-        <div class="section">
-            <!-- Small camera placeholder - video moved here by JS -->
-            <div class="video-container video-small" style="max-width:160px; margin:0 auto 15px;"></div>
+    <div id="qrWorkspace"></div>
 
-            <!-- Progress bar -->
-            <div id="progress-bar-container" style="margin:15px 0;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                    <span id="progress-label" style="font-size:14px; font-weight:500;" data-zh="接收中..." data-en="Receiving...">接收中...</span>
-                    <span id="progress-percent" style="font-size:14px; font-weight:bold;">0%</span>
-                </div>
-                <div style="background:var(--bg-input); border-radius:6px; height:8px; overflow:hidden;">
-                    <div id="progress-bar-fill" style="background:var(--success); height:100%; width:0%; transition:width 0.3s;"></div>
-                </div>
-                <div id="progress-fraction" style="text-align:center; margin-top:4px; font-size:13px; color:var(--text-secondary);">0 / 0</div>
-            </div>
-
-            <!-- Existing scan status (hidden, kept for ID compat) -->
-            <div id="scanStatus" class="progress-indicator" style="display:none;">
-                <span id="scanProgress">准备中...</span>
-                <span id="scanCount">0/0</span>
-            </div>
-
-            <!-- Progress Map -->
-            <div id="progressMapContainer" style="display:none; margin-bottom:15px;">
-                <div class="progress-map-title">
-                    <span data-zh="片段接收详情" data-en="Fragment Details">片段接收详情</span>
-                    <span id="mapStats" style="font-weight:normal; font-size:12px;"></span>
-                </div>
-                <div id="lastScannedInfo" style="font-size:12px; color:var(--warning); min-height:16px;"></div>
-                <div id="progressMap" class="progress-map"></div>
-                <div class="map-legend">
-                    <div class="legend-item"><div class="legend-box" style="background:var(--success);"></div><span data-zh="已接收" data-en="Received">已接收</span></div>
-                    <div class="legend-item"><div class="legend-box" style="background:var(--border-light);"></div><span data-zh="待接收" data-en="Pending">待接收</span></div>
-                    <div class="legend-item"><div class="legend-box" style="background:var(--warning);"></div><span data-zh="刚扫描" data-en="Just Scanned">刚扫描</span></div>
-                </div>
-            </div>
-
-            <div id="missingFragmentsSection" style="display:none; margin:15px 0;">
-                <button class="btn" onclick="showMissingFragments()" style="background:var(--warning); color:var(--bg-primary); width:100%; margin-bottom:10px;" data-zh="📋 显示缺失片段" data-en="📋 Show Missing">📋 显示缺失片段</button>
-                <div id="missingFragmentsList" style="display:none; background:var(--bg-input); padding:12px; border-radius:12px; font-size:13px; max-height:200px; overflow-y:auto;"></div>
-            </div>
-
-            <button class="btn" onclick="stopScan()" style="background:var(--error);" data-zh="⏹️ 停止扫描" data-en="⏹️ Stop">⏹️ 停止扫描</button>
-        </div>
-    </div>
-
-    <!-- State 3: Complete -->
-    <div id="state-complete" class="state-container" style="display:none;">
-        <div class="section">
-            <h2 style="color:var(--success); margin-bottom:15px;"><span data-zh="✅ 传输完成" data-en="✅ Transfer Complete"></span></h2>
-
-            <!-- Text result -->
-            <div id="chunksList" style="display:none; margin-bottom:10px;">
-                <small style="color:var(--text-secondary);" data-zh="已接收片段：" data-en="Received fragments:">已接收片段：</small>
-                <div id="chunksPreview" style="font-family:monospace; font-size:12px; background:var(--bg-input); padding:5px; border-radius:8px; margin-top:5px;"></div>
-            </div>
-            <div id="output">等待扫描...</div>
-            <button class="btn" id="copyBtn" onclick="copyResult()" style="display:none; margin-top:10px; background:var(--accent);" data-zh="📋 复制数据" data-en="📋 Copy">📋 复制数据</button>
-
-            <!-- File result -->
-            <div id="file-download-section" style="display:none; margin-top:20px; padding:20px; background:rgba(48,209,88,0.06); border-radius:12px; border:1px solid var(--success);">
-                <h3 style="margin:0 0 15px 0; color:var(--success);"><span data-zh="📁 文件已接收" data-en="📁 File Received"></span></h3>
-                <div style="margin-bottom:10px;">
-                    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
-                        <span style="color:var(--text-secondary);" data-zh="文件名:" data-en="Name:">文件名:</span>
-                        <span id="downloadFileName" style="font-weight:bold;"></span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
-                        <span style="color:var(--text-secondary);" data-zh="文件大小:" data-en="Size:">文件大小:</span>
-                        <span id="downloadFileSize" style="font-weight:bold;"></span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
-                        <span style="color:var(--text-secondary);" data-zh="文件类型:" data-en="Type:">文件类型:</span>
-                        <span id="downloadFileType" style="font-weight:bold;"></span>
-                    </div>
-                    <div id="fileProgress" style="margin-top:10px; font-size:14px; color:var(--text-secondary);">
-                        <span data-zh="已接收:" data-en="Received:">已接收:</span> <span id="fileProgressText">0 / 0</span>
-                    </div>
-                </div>
-                <div id="checksumError" style="display:none; margin:10px 0; padding:12px; background:rgba(255,159,10,0.08); border:1px solid var(--warning); border-radius:8px; color:var(--warning);">
-                    <strong data-zh="⚠️ 校验和不匹配" data-en="⚠️ Checksum Mismatch">⚠️ 校验和不匹配</strong>
-                    <p style="margin:5px 0 0 0; font-size:13px;" data-zh="文件数据可能损坏。您仍可尝试下载，但文件可能无法正常使用。" data-en="File may be corrupted. You can still try downloading, but it may not work properly.">文件数据可能损坏。您仍可尝试下载，但文件可能无法正常使用。</p>
-                </div>
-                <button class="btn" id="downloadBtn" onclick="triggerFileDownload()" style="width:100%; background:var(--success); font-size:16px;" data-zh="⬇️ 下载文件" data-en="⬇️ Download File">⬇️ 下载文件</button>
-            </div>
-
-            <div id="status"></div>
-
-            <button class="btn" id="scanNewBtn" onclick="resetToReady()" style="margin-top:15px; background:var(--bg-card-hover); border:1px solid var(--border);" data-zh="🔄 重新扫描" data-en="🔄 Scan New">🔄 重新扫描</button>
-        </div>
-    </div>
-</div>
-
+<script>
+// 内嵌 qrcode.min.js
+var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this.parsedData=[];for(var b=[],d=0,e=this.data.length;e>d;d++){b=[];var f=this.data.charCodeAt(d);f>65536?(b[0]=240|(1835008&f)>>>18,b[1]=128|(258048&f)>>>12,b[2]=128|(4032&f)>>>6,b[3]=128|63&f):f>2048?(b[0]=224|(61440&f)>>>12,b[1]=128|(4032&f)>>>6,b[2]=128|63&f):f>128?(b[0]=192|(1984&f)>>>6,b[1]=128|63&f):b[0]=f,this.parsedData=this.parsedData.concat(b)}this.parsedData.length!=this.data.length&&(this.parsedData.unshift(191),this.parsedData.unshift(187),this.parsedData.unshift(239))}function b(a,b){this.typeNumber=a,this.errorCorrectLevel=b,this.modules=null,this.moduleCount=0,this.dataCache=null,this.dataList=[]}function i(a,b){if(void 0==a.length)throw new Error(a.length+"/"+b);for(var c=0;c<a.length&&0==a[c];)c++;this.num=new Array(a.length-c+b);for(var d=0;d<a.length-c;d++)this.num[d]=a[d+c]}function j(a,b){this.totalCount=a,this.dataCount=b}function k(){this.buffer=[],this.length=0}function m(){return"undefined"!=typeof CanvasRenderingContext2D}function n(){var a=!1,b=navigator.userAgent;return/android/i.test(b)&&(a=!0,aMat=b.toString().match(/android ([0-9]\.[0-9])/i),aMat&&aMat[1]&&(a=parseFloat(aMat[1]))),a}function r(a,b){for(var c=1,e=s(a),f=0,g=l.length;g>=f;f++){var h=0;switch(b){case d.L:h=l[f][0];break;case d.M:h=l[f][1];break;case d.Q:h=l[f][2];break;case d.H:h=l[f][3]}if(h>=e)break;c++}if(c>l.length)throw new Error("Too long data");return c}function s(a){var b=encodeURI(a).toString().replace(/\%[0-9a-fA-F]{2}/g,"a");return b.length+(b.length!=a?3:0)}a.prototype={getLength:function(){return this.parsedData.length},write:function(a){for(var b=0,c=this.parsedData.length;c>b;b++)a.put(this.parsedData[b],8)}},b.prototype={addData:function(b){var c=new a(b);this.dataList.push(c),this.dataCache=null},isDark:function(a,b){if(0>a||this.moduleCount<=a||0>b||this.moduleCount<=b)throw new Error(a+","+b);return this.modules[a][b]},getModuleCount:function(){return this.moduleCount},make:function(){this.makeImpl(!1,this.getBestMaskPattern())},makeImpl:function(a,c){this.moduleCount=4*this.typeNumber+17,this.modules=new Array(this.moduleCount);for(var d=0;d<this.moduleCount;d++){this.modules[d]=new Array(this.moduleCount);for(var e=0;e<this.moduleCount;e++)this.modules[d][e]=null}this.setupPositionProbePattern(0,0),this.setupPositionProbePattern(this.moduleCount-7,0),this.setupPositionProbePattern(0,this.moduleCount-7),this.setupPositionAdjustPattern(),this.setupTimingPattern(),this.setupTypeInfo(a,c),this.typeNumber>=7&&this.setupTypeNumber(a),null==this.dataCache&&(this.dataCache=b.createData(this.typeNumber,this.errorCorrectLevel,this.dataList)),this.mapData(this.dataCache,c)},setupPositionProbePattern:function(a,b){for(var c=-1;7>=c;c++)if(!(-1>=a+c||this.moduleCount<=a+c))for(var d=-1;7>=d;d++)-1>=b+d||this.moduleCount<=b+d||(this.modules[a+c][b+d]=c>=0&&6>=c&&(0==d||6==d)||d>=0&&6>=d&&(0==c||6==c)||c>=2&&4>=c&&d>=2&&4>=d?!0:!1)},getBestMaskPattern:function(){for(var a=0,b=0,c=0;8>c;c++){this.makeImpl(!0,c);var d=f.getLostPoint(this);(0==c||a>d)&&(a=d,b=c)}return b},createMovieClip:function(a,b,c){var d=a.createEmptyMovieClip(b,c),e=1;this.make();for(var f=0;f<this.modules.length;f++)for(var g=f*e,h=0;h<this.modules[f].length;h++){var i=h*e,j=this.modules[f][h];j&&(d.beginFill(0,100),d.moveTo(i,g),d.lineTo(i+e,g),d.lineTo(i+e,g+e),d.lineTo(i,g+e),d.endFill())}return d},setupTimingPattern:function(){for(var a=8;a<this.moduleCount-8;a++)null==this.modules[a][6]&&(this.modules[a][6]=0==a%2);for(var b=8;b<this.moduleCount-8;b++)null==this.modules[6][b]&&(this.modules[6][b]=0==b%2)},setupPositionAdjustPattern:function(){for(var a=f.getPatternPosition(this.typeNumber),b=0;b<a.length;b++)for(var c=0;c<a.length;c++){var d=a[b],e=a[c];if(null==this.modules[d][e])for(var g=-2;2>=g;g++)for(var h=-2;2>=h;h++)this.modules[d+g][e+h]=-2==g||2==g||-2==h||2==h||0==g&&0==h?!0:!1}},setupTypeNumber:function(a){for(var b=f.getBCHTypeNumber(this.typeNumber),c=0;18>c;c++){var d=!a&&1==(1&b>>c);this.modules[Math.floor(c/3)][c%3+this.moduleCount-8-3]=d}for(var c=0;18>c;c++){var d=!a&&1==(1&b>>c);this.modules[c%3+this.moduleCount-8-3][Math.floor(c/3)]=d}},setupTypeInfo:function(a,b){for(var c=this.errorCorrectLevel<<3|b,d=f.getBCHTypeInfo(c),e=0;15>e;e++){var g=!a&&1==(1&d>>e);6>e?this.modules[e][8]=g:8>e?this.modules[e+1][8]=g:this.modules[this.moduleCount-15+e][8]=g}for(var e=0;15>e;e++){var g=!a&&1==(1&d>>e);8>e?this.modules[8][this.moduleCount-e-1]=g:9>e?this.modules[8][15-e-1+1]=g:this.modules[8][15-e-1]=g}this.modules[this.moduleCount-8][8]=!a},mapData:function(a,b){for(var c=-1,d=this.moduleCount-1,e=7,g=0,h=this.moduleCount-1;h>0;h-=2)for(6==h&&h--;;){for(var i=0;2>i;i++)if(null==this.modules[d][h-i]){var j=!1;g<a.length&&(j=1==(1&a[g]>>>e));var k=f.getMask(b,d,h-i);k&&(j=!j),this.modules[d][h-i]=j,e--,-1==e&&(g++,e=7)}if(d+=c,0>d||this.moduleCount<=d){d-=c,c=-c;break}}}},b.PAD0=236,b.PAD1=17,b.createData=function(a,c,d){for(var e=j.getRSBlocks(a,c),g=new k,h=0;h<d.length;h++){var i=d[h];g.put(i.mode,4),g.put(i.getLength(),f.getLengthInBits(i.mode,a)),i.write(g)}for(var l=0,h=0;h<e.length;h++)l+=e[h].dataCount;if(g.getLengthInBits()>8*l)throw new Error("code length overflow. ("+g.getLengthInBits()+">"+8*l+")");for(g.getLengthInBits()+4<=8*l&&g.put(0,4);0!=g.getLengthInBits()%8;)g.putBit(!1);for(;;){if(g.getLengthInBits()>=8*l)break;if(g.put(b.PAD0,8),g.getLengthInBits()>=8*l)break;g.put(b.PAD1,8)}return b.createBytes(g,e)},b.createBytes=function(a,b){for(var c=0,d=0,e=0,g=new Array(b.length),h=new Array(b.length),j=0;j<b.length;j++){var k=b[j].dataCount,l=b[j].totalCount-k;d=Math.max(d,k),e=Math.max(e,l),g[j]=new Array(k);for(var m=0;m<g[j].length;m++)g[j][m]=255&a.buffer[m+c];c+=k;var n=f.getErrorCorrectPolynomial(l),o=new i(g[j],n.getLength()-1),p=o.mod(n);h[j]=new Array(n.getLength()-1);for(var m=0;m<h[j].length;m++){var q=m+p.getLength()-h[j].length;h[j][m]=q>=0?p.get(q):0}}for(var r=0,m=0;m<b.length;m++)r+=b[m].totalCount;for(var s=new Array(r),t=0,m=0;d>m;m++)for(var j=0;j<b.length;j++)m<g[j].length&&(s[t++]=g[j][m]);for(var m=0;e>m;m++)for(var j=0;j<b.length;j++)m<h[j].length&&(s[t++]=h[j][m]);return s};for(var c={MODE_NUMBER:1,MODE_ALPHA_NUM:2,MODE_8BIT_BYTE:4,MODE_KANJI:8},d={L:1,M:0,Q:3,H:2},e={PATTERN000:0,PATTERN001:1,PATTERN010:2,PATTERN011:3,PATTERN100:4,PATTERN101:5,PATTERN110:6,PATTERN111:7},f={PATTERN_POSITION_TABLE:[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,52,78,104,130],[6,30,56,82,108,134],[6,34,60,86,112,138],[6,30,58,86,114,142],[6,34,62,90,118,146],[6,30,54,78,102,126,150],[6,24,50,76,102,128,154],[6,28,54,80,106,132,158],[6,32,58,84,110,136,162],[6,26,54,82,110,138,166],[6,30,58,86,114,142,170]],G15:1335,G18:7973,G15_MASK:21522,getBCHTypeInfo:function(a){for(var b=a<<10;f.getBCHDigit(b)-f.getBCHDigit(f.G15)>=0;)b^=f.G15<<f.getBCHDigit(b)-f.getBCHDigit(f.G15);return(a<<10|b)^f.G15_MASK},getBCHTypeNumber:function(a){for(var b=a<<12;f.getBCHDigit(b)-f.getBCHDigit(f.G18)>=0;)b^=f.G18<<f.getBCHDigit(b)-f.getBCHDigit(f.G18);return a<<12|b},getBCHDigit:function(a){for(var b=0;0!=a;)b++,a>>>=1;return b},getPatternPosition:function(a){return f.PATTERN_POSITION_TABLE[a-1]},getMask:function(a,b,c){switch(a){case e.PATTERN000:return 0==(b+c)%2;case e.PATTERN001:return 0==b%2;case e.PATTERN010:return 0==c%3;case e.PATTERN011:return 0==(b+c)%3;case e.PATTERN100:return 0==(Math.floor(b/2)+Math.floor(c/3))%2;case e.PATTERN101:return 0==b*c%2+b*c%3;case e.PATTERN110:return 0==(b*c%2+b*c%3)%2;case e.PATTERN111:return 0==(b*c%3+(b+c)%2)%2;default:throw new Error("bad maskPattern:"+a)}},getErrorCorrectPolynomial:function(a){for(var b=new i([1],0),c=0;a>c;c++)b=b.multiply(new i([1,g.gexp(c)],0));return b},getLengthInBits:function(a,b){if(b>=1&&10>b)switch(a){case c.MODE_NUMBER:return 10;case c.MODE_ALPHA_NUM:return 9;case c.MODE_8BIT_BYTE:return 8;case c.MODE_KANJI:return 8;default:throw new Error("mode:"+a)}else if(27>b)switch(a){case c.MODE_NUMBER:return 12;case c.MODE_ALPHA_NUM:return 11;case c.MODE_8BIT_BYTE:return 16;case c.MODE_KANJI:return 10;default:throw new Error("mode:"+a)}else{if(!(41>b))throw new Error("type:"+b);switch(a){case c.MODE_NUMBER:return 14;case c.MODE_ALPHA_NUM:return 13;case c.MODE_8BIT_BYTE:return 16;case c.MODE_KANJI:return 12;default:throw new Error("mode:"+a)}}},getLostPoint:function(a){for(var b=a.getModuleCount(),c=0,d=0;b>d;d++)for(var e=0;b>e;e++){for(var f=0,g=a.isDark(d,e),h=-1;1>=h;h++)if(!(0>d+h||d+h>=b))for(var i=-1;1>=i;i++)0>e+i||e+i>=b||(0!=h||0!=i)&&g==a.isDark(d+h,e+i)&&f++;f>5&&(c+=3+f-5)}for(var d=0;b-1>d;d++)for(var e=0;b-1>e;e++){var j=0;a.isDark(d,e)&&j++,a.isDark(d+1,e)&&j++,a.isDark(d,e+1)&&j++,a.isDark(d+1,e+1)&&j++,(0==j||4==j)&&(c+=3)}for(var d=0;b>d;d++)for(var e=0;b-6>e;e++)a.isDark(d,e)&&!a.isDark(d,e+1)&&a.isDark(d,e+2)&&a.isDark(d,e+3)&&a.isDark(d,e+4)&&!a.isDark(d,e+5)&&a.isDark(d,e+6)&&(c+=40);for(var e=0;b>e;e++)for(var d=0;b-6>d;d++)a.isDark(d,e)&&!a.isDark(d+1,e)&&a.isDark(d+2,e)&&a.isDark(d+3,e)&&a.isDark(d+4,e)&&!a.isDark(d+5,e)&&a.isDark(d+6,e)&&(c+=40);for(var k=0,e=0;b>e;e++)for(var d=0;b>d;d++)a.isDark(d,e)&&k++;var l=Math.abs(100*k/b/b-50)/5;return c+=10*l}},g={glog:function(a){if(1>a)throw new Error("glog("+a+")");return g.LOG_TABLE[a]},gexp:function(a){for(;0>a;)a+=255;for(;a>=256;)a-=255;return g.EXP_TABLE[a]},EXP_TABLE:new Array(256),LOG_TABLE:new Array(256)},h=0;8>h;h++)g.EXP_TABLE[h]=1<<h;for(var h=8;256>h;h++)g.EXP_TABLE[h]=g.EXP_TABLE[h-4]^g.EXP_TABLE[h-5]^g.EXP_TABLE[h-6]^g.EXP_TABLE[h-8];for(var h=0;255>h;h++)g.LOG_TABLE[g.EXP_TABLE[h]]=h;i.prototype={get:function(a){return this.num[a]},getLength:function(){return this.num.length},multiply:function(a){for(var b=new Array(this.getLength()+a.getLength()-1),c=0;c<this.getLength();c++)for(var d=0;d<a.getLength();d++)b[c+d]^=g.gexp(g.glog(this.get(c))+g.glog(a.get(d)));return new i(b,0)},mod:function(a){if(this.getLength()-a.getLength()<0)return this;for(var b=g.glog(this.get(0))-g.glog(a.get(0)),c=new Array(this.getLength()),d=0;d<this.getLength();d++)c[d]=this.get(d);for(var d=0;d<a.getLength();d++)c[d]^=g.gexp(g.glog(a.get(d))+b);return new i(c,0).mod(a)}},j.RS_BLOCK_TABLE=[[1,26,19],[1,26,16],[1,26,13],[1,26,9],[1,44,34],[1,44,28],[1,44,22],[1,44,16],[1,70,55],[1,70,44],[2,35,17],[2,35,13],[1,100,80],[2,50,32],[2,50,24],[4,25,9],[1,134,108],[2,67,43],[2,33,15,2,34,16],[2,33,11,2,34,12],[2,86,68],[4,43,27],[4,43,19],[4,43,15],[2,98,78],[4,49,31],[2,32,14,4,33,15],[4,39,13,1,40,14],[2,121,97],[2,60,38,2,61,39],[4,40,18,2,41,19],[4,40,14,2,41,15],[2,146,116],[3,58,36,2,59,37],[4,36,16,4,37,17],[4,36,12,4,37,13],[2,86,68,2,87,69],[4,69,43,1,70,44],[6,43,19,2,44,20],[6,43,15,2,44,16],[4,101,81],[1,80,50,4,81,51],[4,50,22,4,51,23],[3,36,12,8,37,13],[2,116,92,2,117,93],[6,58,36,2,59,37],[4,46,20,6,47,21],[7,42,14,4,43,15],[4,133,107],[8,59,37,1,60,38],[8,44,20,4,45,21],[12,33,11,4,34,12],[3,145,115,1,146,116],[4,64,40,5,65,41],[11,36,16,5,37,17],[11,36,12,5,37,13],[5,109,87,1,110,88],[5,65,41,5,66,42],[5,54,24,7,55,25],[11,36,12,7,37,13],[5,122,98,1,123,99],[7,73,45,3,74,46],[15,43,19,2,44,20],[3,45,15,13,46,16],[1,135,107,5,136,108],[10,74,46,1,75,47],[1,50,22,15,51,23],[2,42,14,17,43,15],[5,150,120,1,151,121],[9,69,43,4,70,44],[17,50,22,1,51,23],[2,42,14,19,43,15],[3,141,113,4,142,114],[3,70,44,11,71,45],[17,47,21,4,48,22],[9,39,13,16,40,14],[3,135,107,5,136,108],[3,67,41,13,68,42],[15,54,24,5,55,25],[15,43,15,10,44,16],[4,144,116,4,145,117],[17,68,42],[17,50,22,6,51,23],[19,46,16,6,47,17],[2,139,111,7,140,112],[17,74,46],[7,54,24,16,55,25],[34,37,13],[4,151,121,5,152,122],[4,75,47,14,76,48],[11,54,24,14,55,25],[16,45,15,14,46,16],[6,147,117,4,148,118],[6,73,45,14,74,46],[11,54,24,16,55,25],[30,46,16,2,47,17],[8,132,106,4,133,107],[8,75,47,13,76,48],[7,54,24,22,55,25],[22,45,15,13,46,16],[10,142,114,2,143,115],[19,74,46,4,75,47],[28,50,22,6,51,23],[33,46,16,4,47,17],[8,152,122,4,153,123],[22,73,45,3,74,46],[8,53,23,26,54,24],[12,45,15,28,46,16],[3,147,117,10,148,118],[3,73,45,23,74,46],[4,54,24,31,55,25],[11,45,15,31,46,16],[7,146,116,7,147,117],[21,73,45,7,74,46],[1,53,23,37,54,24],[19,45,15,26,46,16],[5,145,115,10,146,116],[19,75,47,10,76,48],[15,54,24,25,55,25],[23,45,15,25,46,16],[13,145,115,3,146,116],[2,74,46,29,75,47],[42,54,24,1,55,25],[23,45,15,28,46,16],[17,145,115],[10,74,46,23,75,47],[10,54,24,35,55,25],[19,45,15,35,46,16],[17,145,115,1,146,116],[14,74,46,21,75,47],[29,54,24,19,55,25],[11,45,15,46,46,16],[13,145,115,6,146,116],[14,74,46,23,75,47],[44,54,24,7,55,25],[59,46,16,1,47,17],[12,151,121,7,152,122],[12,75,47,26,76,48],[39,54,24,14,55,25],[22,45,15,41,46,16],[6,151,121,14,152,122],[6,75,47,34,76,48],[46,54,24,10,55,25],[2,45,15,64,46,16],[17,152,122,4,153,123],[29,74,46,14,75,47],[49,54,24,10,55,25],[24,45,15,46,46,16],[4,152,122,18,153,123],[13,74,46,32,75,47],[48,54,24,14,55,25],[42,45,15,32,46,16],[20,147,117,4,148,118],[40,75,47,7,76,48],[43,54,24,22,55,25],[10,45,15,67,46,16],[19,148,118,6,149,119],[18,75,47,31,76,48],[34,54,24,34,55,25],[20,45,15,61,46,16]],j.getRSBlocks=function(a,b){var c=j.getRsBlockTable(a,b);if(void 0==c)throw new Error("bad rs block @ typeNumber:"+a+"/errorCorrectLevel:"+b);for(var d=c.length/3,e=[],f=0;d>f;f++)for(var g=c[3*f+0],h=c[3*f+1],i=c[3*f+2],k=0;g>k;k++)e.push(new j(h,i));return e},j.getRsBlockTable=function(a,b){switch(b){case d.L:return j.RS_BLOCK_TABLE[4*(a-1)+0];case d.M:return j.RS_BLOCK_TABLE[4*(a-1)+1];case d.Q:return j.RS_BLOCK_TABLE[4*(a-1)+2];case d.H:return j.RS_BLOCK_TABLE[4*(a-1)+3];default:return void 0}},k.prototype={get:function(a){var b=Math.floor(a/8);return 1==(1&this.buffer[b]>>>7-a%8)},put:function(a,b){for(var c=0;b>c;c++)this.putBit(1==(1&a>>>b-c-1))},getLengthInBits:function(){return this.length},putBit:function(a){var b=Math.floor(this.length/8);this.buffer.length<=b&&this.buffer.push(0),a&&(this.buffer[b]|=128>>>this.length%8),this.length++}};var l=[[17,14,11,7],[32,26,20,14],[53,42,32,24],[78,62,46,34],[106,84,60,44],[134,106,74,58],[154,122,86,64],[192,152,108,84],[230,180,130,98],[271,213,151,119],[321,251,177,137],[367,287,203,155],[425,331,241,177],[458,362,258,194],[520,412,292,220],[586,450,322,250],[644,504,364,280],[718,560,394,310],[792,624,442,338],[858,666,482,382],[929,711,509,403],[1003,779,565,439],[1091,857,611,461],[1171,911,661,511],[1273,997,715,535],[1367,1059,751,593],[1465,1125,805,625],[1528,1190,868,658],[1628,1264,908,698],[1732,1370,982,742],[1840,1452,1030,790],[1952,1538,1112,842],[2068,1628,1168,898],[2188,1722,1228,958],[2303,1809,1283,983],[2431,1911,1351,1051],[2563,1989,1423,1093],[2699,2099,1499,1139],[2809,2213,1579,1219],[2953,2331,1663,1273]],o=function(){var a=function(a,b){this._el=a,this._htOption=b};return a.prototype.draw=function(a){function g(a,b){var c=document.createElementNS("http://www.w3.org/2000/svg",a);for(var d in b)b.hasOwnProperty(d)&&c.setAttribute(d,b[d]);return c}var b=this._htOption,c=this._el,d=a.getModuleCount();Math.floor(b.width/d),Math.floor(b.height/d),this.clear();var h=g("svg",{viewBox:"0 0 "+String(d)+" "+String(d),width:"100%",height:"100%",fill:b.colorLight});h.setAttributeNS("http://www.w3.org/2000/xmlns/","xmlns:xlink","http://www.w3.org/1999/xlink"),c.appendChild(h),h.appendChild(g("rect",{fill:b.colorDark,width:"1",height:"1",id:"template"}));for(var i=0;d>i;i++)for(var j=0;d>j;j++)if(a.isDark(i,j)){var k=g("use",{x:String(i),y:String(j)});k.setAttributeNS("http://www.w3.org/1999/xlink","href","#template"),h.appendChild(k)}},a.prototype.clear=function(){for(;this._el.hasChildNodes();)this._el.removeChild(this._el.lastChild)},a}(),p="svg"===document.documentElement.tagName.toLowerCase(),q=p?o:m()?function(){function a(){this._elImage.src=this._elCanvas.toDataURL("image/png"),this._elImage.style.display="block",this._elCanvas.style.display="none"}function d(a,b){var c=this;if(c._fFail=b,c._fSuccess=a,null===c._bSupportDataURI){var d=document.createElement("img"),e=function(){c._bSupportDataURI=!1,c._fFail&&_fFail.call(c)},f=function(){c._bSupportDataURI=!0,c._fSuccess&&c._fSuccess.call(c)};return d.onabort=e,d.onerror=e,d.onload=f,d.src="data:image/gif;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHElEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==",void 0}c._bSupportDataURI===!0&&c._fSuccess?c._fSuccess.call(c):c._bSupportDataURI===!1&&c._fFail&&c._fFail.call(c)}if(this._android&&this._android<=2.1){var b=1/window.devicePixelRatio,c=CanvasRenderingContext2D.prototype.drawImage;CanvasRenderingContext2D.prototype.drawImage=function(a,d,e,f,g,h,i,j){if("nodeName"in a&&/img/i.test(a.nodeName))for(var l=arguments.length-1;l>=1;l--)arguments[l]=arguments[l]*b;else"undefined"==typeof j&&(arguments[1]*=b,arguments[2]*=b,arguments[3]*=b,arguments[4]*=b);c.apply(this,arguments)}}var e=function(a,b){this._bIsPainted=!1,this._android=n(),this._htOption=b,this._elCanvas=document.createElement("canvas"),this._elCanvas.width=b.width,this._elCanvas.height=b.height,a.appendChild(this._elCanvas),this._el=a,this._oContext=this._elCanvas.getContext("2d"),this._bIsPainted=!1,this._elImage=document.createElement("img"),this._elImage.style.display="none",this._el.appendChild(this._elImage),this._bSupportDataURI=null};return e.prototype.draw=function(a){var b=this._elImage,c=this._oContext,d=this._htOption,e=a.getModuleCount(),f=d.width/e,g=d.height/e,h=Math.round(f),i=Math.round(g);b.style.display="none",this.clear();for(var j=0;e>j;j++)for(var k=0;e>k;k++){var l=a.isDark(j,k),m=k*f,n=j*g;c.strokeStyle=l?d.colorDark:d.colorLight,c.lineWidth=1,c.fillStyle=l?d.colorDark:d.colorLight,c.fillRect(m,n,f,g),c.strokeRect(Math.floor(m)+.5,Math.floor(n)+.5,h,i),c.strokeRect(Math.ceil(m)-.5,Math.ceil(n)-.5,h,i)}this._bIsPainted=!0},e.prototype.makeImage=function(){this._bIsPainted&&d.call(this,a)},e.prototype.isPainted=function(){return this._bIsPainted},e.prototype.clear=function(){this._oContext.clearRect(0,0,this._elCanvas.width,this._elCanvas.height),this._bIsPainted=!1},e.prototype.round=function(a){return a?Math.floor(1e3*a)/1e3:a},e}():function(){var a=function(a,b){this._el=a,this._htOption=b};return a.prototype.draw=function(a){for(var b=this._htOption,c=this._el,d=a.getModuleCount(),e=Math.floor(b.width/d),f=Math.floor(b.height/d),g=['<table style="border:0;border-collapse:collapse;">'],h=0;d>h;h++){g.push("<tr>");for(var i=0;d>i;i++)g.push('<td style="border:0;border-collapse:collapse;padding:0;margin:0;width:'+e+"px;height:"+f+"px;background-color:"+(a.isDark(h,i)?b.colorDark:b.colorLight)+';"></td>');g.push("</tr>")}g.push("</table>"),c.innerHTML=g.join("");var j=c.childNodes[0],k=(b.width-j.offsetWidth)/2,l=(b.height-j.offsetHeight)/2;k>0&&l>0&&(j.style.margin=l+"px "+k+"px")},a.prototype.clear=function(){this._el.innerHTML=""},a}();QRCode=function(a,b){if(this._htOption={width:256,height:256,typeNumber:4,colorDark:"#000000",colorLight:"#ffffff",correctLevel:d.H},"string"==typeof b&&(b={text:b}),b)for(var c in b)this._htOption[c]=b[c];"string"==typeof a&&(a=document.getElementById(a)),this._android=n(),this._el=a,this._oQRCode=null,this._oDrawing=new q(this._el,this._htOption),this._htOption.text&&this.makeCode(this._htOption.text)},QRCode.prototype.makeCode=function(a){this._oQRCode=new b(r(a,this._htOption.correctLevel),this._htOption.correctLevel),this._oQRCode.addData(a),this._oQRCode.make(),this._el.title=a,this._oDrawing.draw(this._oQRCode),this.makeImage()},QRCode.prototype.makeImage=function(){"function"==typeof this._oDrawing.makeImage&&(!this._android||this._android>=3)&&this._oDrawing.makeImage()},QRCode.prototype.clear=function(){this._oDrawing.clear()},QRCode.CorrectLevel=d}();
+</script>
 <script>
 // 内嵌jsQR.js的核心功能（简化版）
 // 注：实际使用时需要完整的jsQR库
@@ -10470,1115 +10209,484 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 /***/ })
 /******/ ])["default"];
 });
+</script>
 
-// 确保jsQR在全局可用
-// jsQR库通过UMD模式导出，检查不同的可能位置
-(function() {
-    // 调试：检查jsQR的位置
-    console.log('检查jsQR库...');
-    console.log('typeof jsQR:', typeof jsQR);
-    console.log('typeof window.jsQR:', typeof window.jsQR);
-    
-    if (typeof window !== 'undefined') {
-        if (typeof jsQR === 'function') {
-            window.jsQR = jsQR;
-            console.log('✅ jsQR已设置到window.jsQR');
-        } else {
-            console.error('❌ jsQR函数未找到');
-            // 尝试创建一个假的jsQR函数用于测试
-            window.jsQR = function(data, width, height) {
-                console.log('使用模拟jsQR函数');
-                // 简单的模拟：随机返回null或测试数据
-                if (Math.random() > 0.9) {
-                    return {
-                        data: '{"i":1,"t":1,"d":"测试数据"}'
-                    };
-                }
-                return null;
-            };
-        }
-    }
-})();
+<script>
+// ============================================================
+// Sender functions (adapted: errorLevel as parameter)
+// ============================================================
 
-// 扫描应用代码
-let video, canvas, context;
-let chunks = {};
-let scanning = false;
-let totalChunks = 0;
-let scanningStartTime = Date.now();
-let currentUIState = 'ready';
-let hasReceivedFirstFragment = false;
-
-// ===== State Management =====
-function setState(state) {
-    currentUIState = state;
-    var states = ['recovery', 'ready', 'aiming', 'receiving', 'complete'];
-    states.forEach(function(s) {
-        var el = document.getElementById('state-' + s);
-        if (el) el.style.display = (s === state) ? 'block' : 'none';
-    });
-
-    // Move video element to appropriate container
-    var videoEl = document.getElementById('video');
-    if (videoEl) {
-        if (state === 'aiming') {
-            var aimingContainer = document.querySelector('#state-aiming .video-container');
-            if (aimingContainer && videoEl.parentNode !== aimingContainer) {
-                aimingContainer.appendChild(videoEl);
-            }
-        } else if (state === 'receiving') {
-            var recvContainer = document.querySelector('#state-receiving .video-container');
-            if (recvContainer && videoEl.parentNode !== recvContainer) {
-                recvContainer.appendChild(videoEl);
-            }
-        }
-    }
-
-    console.log('UI State → ' + state);
-}
-
-function updateProgressBar(received, total) {
-    if (total <= 0) return;
-    var pct = Math.round((received / total) * 100);
-    var fill = document.getElementById('progress-bar-fill');
-    var pctEl = document.getElementById('progress-percent');
-    var fracEl = document.getElementById('progress-fraction');
-    if (fill) fill.style.width = pct + '%';
-    if (pctEl) pctEl.textContent = pct + '%';
-    if (fracEl) fracEl.textContent = received + ' / ' + total;
-}
-
-function resetToReady() {
-    // Stop scan if running
-    if (scanning) {
-        scanning = false;
-        if (video && video.srcObject) {
-            video.srcObject.getTracks().forEach(function(track) { track.stop(); });
-        }
-    }
-
-    // Clear all state
-    clearSession();
-    currentSession = null;
-    chunks = {};
-    totalChunks = 0;
-    fileFragments = {};
-    fileMetadata = null;
-    fileTotalFragments = 0;
-    hasReceivedFirstFragment = false;
-
-    // Reset UI elements
-    document.getElementById('output').textContent = '等待扫描...';
-    var chunksList = document.getElementById('chunksList');
-    if (chunksList) { chunksList.style.display = 'none'; chunksList.innerHTML = ''; }
-    document.getElementById('file-download-section').style.display = 'none';
-    document.getElementById('copyBtn').style.display = 'none';
-    document.getElementById('checksumError').style.display = 'none';
-    var progMap = document.getElementById('progressMapContainer');
-    if (progMap) progMap.style.display = 'none';
-    var mfs = document.getElementById('missingFragmentsSection');
-    if (mfs) { mfs.style.display = 'none'; }
-    var mfl = document.getElementById('missingFragmentsList');
-    if (mfl) { mfl.style.display = 'none'; mfl.innerHTML = ''; }
-    updateProgressBar(0, 1);
-
-    setState('ready');
-    console.log('Reset to ready state');
-}
-
-async function startScan() {
-    video = document.getElementById('video');
-    canvas = document.getElementById('canvas');
-    context = canvas.getContext('2d');
-    
-    // 重置状态
-    chunks = {};
-    totalChunks = 0;
-    scanningStartTime = Date.now();
-    hasReceivedFirstFragment = false;
-
-    // Switch to aiming state
-    setState('aiming');
-
-    // 更新UI状态
-    document.getElementById('scanBtn').style.display = 'none';
-    document.getElementById('stopBtn').style.display = 'block';
-    document.getElementById('scanStatus').style.display = 'flex';
-    document.getElementById('scanStatus').className = 'progress-indicator scanning-indicator';
-    updateScanProgress('正在启动摄像头...', 0, 0);
-    
-    // 检测iOS设备
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    
-    // 根据设备调整配置
-    const constraints = {
-        video: {
-            facingMode: "environment",
-            width: { ideal: isIOS ? 640 : 1280 },  // iOS使用较低分辨率
-            height: { ideal: isIOS ? 480 : 720 }
-        }
+function getChunkSizes(errorLevel) {
+    const sizes = {
+        'L': { first: 350, rest: 500 },
+        'M': { first: 300, rest: 400 },
+        'Q': { first: 200, rest: 300 },
+        'H': { first: 150, rest: 200 }
     };
-    
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        
-        video.srcObject = stream;
-        video.style.display = 'block';
-        
-        // iOS需要特殊处理
-        if (isIOS) {
-            video.setAttribute('playsinline', 'true');
-            video.setAttribute('webkit-playsinline', 'true');
-            video.setAttribute('muted', 'true');
-            video.setAttribute('autoplay', 'true');
-        }
-        
-        // 确保视频播放
-        const playPromise = video.play();
-        if (playPromise !== undefined) {
-            playPromise.catch(error => {
-                console.log('自动播放失败，尝试手动播放:', error);
-                // 备用：用户交互后播放
-                setTimeout(() => video.play(), 100);
-            });
-        }
-        scanning = true;
-        
-        // 显示视频控制按钮
-        document.getElementById('videoControls').style.display = 'flex';
-        
-        updateScanProgress('📷 扫描中...请将QR码对准摄像头', 0, 0);
-        
-        // iOS Safari 兼容性：等待视频加载完成
-        video.onloadedmetadata = () => {
-            console.log('视频流已就绪，开始扫描');
-            scan();
-        };
-        
-        // 备用启动方式
-        setTimeout(() => {
-            if (scanning && video.readyState >= 2) {
-                scan();
-            }
-        }, 1000);
-        
-    } catch (err) {
-        console.error('摄像头访问失败:', err);
-        let hint = err.message;
-        if (window.location.protocol !== 'https:' && window.location.protocol !== 'file:') {
-            hint += '（提示：摄像头功能需要 HTTPS 或本地文件访问）';
-        }
-        updateScanProgress('❌ 摄像头访问失败: ' + hint, 0, 0);
-        resetScanUI();
-    }
+    return sizes[errorLevel] || sizes['H'];
 }
 
-function stopScan() {
-    scanning = false;
-    if (video && video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop());
-        video.style.display = 'none';
-    }
-    resetScanUI();
-    updateScanProgress('⏹️ 扫描已停止', Object.keys(chunks).length, totalChunks);
-    // If no fragments received and not completing, go back to ready
-    if (!hasReceivedFirstFragment && currentUIState !== 'complete') {
-        setState('ready');
-    }
-}
-
-function resetScanUI() {
-    document.getElementById('scanBtn').style.display = 'block';
-    document.getElementById('stopBtn').style.display = 'none';
-    document.getElementById('videoControls').style.display = 'none';
-}
-
-// 复制结果到剪贴板
-function copyResult() {
-    const output = document.getElementById('output');
-    const text = output.textContent;
-    
-    if (navigator.clipboard) {
-        // 现代浏览器
-        navigator.clipboard.writeText(text).then(() => {
-            // 临时改变按钮文字显示成功
-            const btn = document.getElementById('copyBtn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '✅ 已复制！';
-            setTimeout(() => {
-                btn.innerHTML = originalText;
-            }, 2000);
-        }).catch(err => {
-            console.error('复制失败:', err);
-            fallbackCopy(text);
-        });
+function chunkText(text, maxSize, errorLevel) {
+    let effectiveSize = maxSize;
+    if (errorLevel === 'H') {
+        effectiveSize = Math.floor(maxSize * 0.6);
+    } else if (errorLevel === 'Q') {
+        effectiveSize = Math.floor(maxSize * 0.7);
+    } else if (errorLevel === 'M') {
+        effectiveSize = Math.floor(maxSize * 0.8);
     } else {
-        // 旧版浏览器备用方案
-        fallbackCopy(text);
+        if (maxSize <= 15) effectiveSize = maxSize;
+        else if (maxSize <= 30) effectiveSize = Math.floor(maxSize * 0.85);
+        else if (maxSize <= 50) effectiveSize = Math.floor(maxSize * 0.75);
+        else if (maxSize <= 80) effectiveSize = Math.floor(maxSize * 0.65);
+        else effectiveSize = Math.floor(maxSize * 0.6);
     }
+    const chunks = [];
+    for (let i = 0; i < text.length; i += effectiveSize) {
+        chunks.push(text.slice(i, i + effectiveSize));
+    }
+    return chunks;
 }
 
-// 备用复制方法
-function fallbackCopy(text) {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    try {
-        document.execCommand('copy');
-        const btn = document.getElementById('copyBtn');
-        const originalText = btn.innerHTML;
-        btn.innerHTML = '✅ 已复制！';
-        setTimeout(() => {
-            btn.innerHTML = originalText;
-        }, 2000);
-    } catch (err) {
-        console.error('复制失败:', err);
-        alert('复制失败，请手动选择复制');
+function chunkFile(file, pureBase64, checksum, errorLevel) {
+    const base64 = pureBase64;
+    const cs = getChunkSizes(errorLevel);
+    const fragmentSize = cs.rest;
+    const fragments = [];
+    const metaObj = {
+        n: file.name,
+        m: file.type || 'application/octet-stream',
+        s: file.size,
+        c: checksum
+    };
+    const metaOverhead = JSON.stringify(metaObj).length + ',"meta":'.length;
+    const firstFragmentSize = Math.max(50, cs.first - metaOverhead);
+    log(`  第1片base64预算: ${firstFragmentSize} 字节 (元数据开销: ${metaOverhead} 字节)`);
+
+    let position = 0;
+    let index = 0;
+    while (position < base64.length) {
+        const chunkSize = (index === 0) ? firstFragmentSize : fragmentSize;
+        const chunk = base64.substr(position, chunkSize);
+        const fragment = { type: "file", index: index, total: 0, data: chunk };
+        if (index === 0) fragment.meta = metaObj;
+        fragments.push(fragment);
+        position += chunkSize;
+        index++;
     }
-    document.body.removeChild(textarea);
+    fragments.forEach(f => f.total = fragments.length);
+    return fragments;
 }
 
-function updateScanProgress(message, received, total) {
-    document.getElementById('scanProgress').textContent = message;
-    document.getElementById('scanCount').textContent = `${received}/${total}`;
-
-    // 更新状态栏样式
-    const statusEl = document.getElementById('scanStatus');
-    if (received === total && total > 0) {
-        statusEl.className = 'progress-indicator success-indicator';
-    } else if (received > 0) {
-        statusEl.className = 'progress-indicator';
-    }
-}
-
-// ========== T043 & T026-T027: 文本片段处理函数（集成会话持久化）==========
-function handleTextFragment(data) {
-    // T026: 创建或加载会话
-    if (!currentSession || currentSession.type !== 'text') {
-        // 创建新会话
-        const fragment = {
-            type: 'text',
-            index: data.i,
-            total: data.t,
-            data: data.d,
-            encoding: data.e
-        };
-        currentSession = createSession(fragment);
-        console.log('创建文本传输会话:', currentSession.id);
-    }
-
-    // 检查是否为Base64编码
-    let decodedChunk = data.d;
-    if (data.e === 'b64') {
-        try {
-            // Base64解码
-            decodedChunk = decodeURIComponent(escape(atob(data.d)));
-        } catch (e) {
-            console.error('Base64解码失败:', e);
-        }
-    }
-    const isDuplicateChunk = data.i in chunks;
-    chunks[data.i] = decodedChunk;
-    totalChunks = data.t;
-
-    // T026: 更新会话并保存到 LocalStorage
-    currentSession.receivedFragments[data.i] = decodedChunk;
-    currentSession.totalFragments = data.t;
-    saveSession(currentSession);
-
-    // FIX: Update visual progress map for text
-    updateProgressMap(totalChunks, chunks, data.i);
-
-    // Show missing fragments button
-    var mfs = document.getElementById('missingFragmentsSection');
-    if (mfs) mfs.style.display = 'block';
-
-    // Update last-scanned info
-    const lsi = document.getElementById('lastScannedInfo');
-    if (lsi) lsi.textContent = isDuplicateChunk
-        ? `最后扫描: #${data.i + 1} (重复)`
-        : `最后扫描: #${data.i + 1} ✓ 新`;
-
-    updateOutput();
-    updateScanProgress('🔍 扫描中...', Object.keys(chunks).length, totalChunks);
-    updateProgressBar(Object.keys(chunks).length, totalChunks);
-
-    // 播放提示音（如果支持）
-    try {
-        const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmzQQ==');
-        audio.volume = 0.3;
-        audio.play();
-    } catch (e) {}
-
-    // T027: 检查是否接收完成
-    if (Object.keys(chunks).length === data.t) {
-        const fullText = Object.keys(chunks)
-            .sort((a, b) => parseInt(a) - parseInt(b))
-            .map(key => chunks[key])
-            .join('');
-
-        document.getElementById('output').textContent = fullText;
-        document.getElementById('chunksList').style.display = 'none';
-        document.getElementById('copyBtn').style.display = 'block'; // 显示复制按钮
-
-        // 完成状态
-        updateScanProgress('✅ 扫描完成！', data.t, data.t);
-
-        // T027: 文本传输完成，清除会话
-        clearSession();
-        currentSession = null;
-        console.log('文本传输完成，会话已清除');
-
-        // 播放成功音效（可选）
-        try {
-            const successAudio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmzQQ==');
-            successAudio.volume = 0.5;
-            successAudio.play();
-        } catch (e) {}
-
-        scanning = false;
-        stopScan();
-        setState('complete');
-    }
-}
-
-// ========== T044 & T026: 文件片段处理函数（集成会话持久化）==========
-// 文件传输全局变量
-let fileFragments = {}; // 存储文件片段
-let fileMetadata = null; // 文件元数据
-let fileTotalFragments = 0; // 文件总片数
-
-// 辅助函数：标准化元数据格式 (支持新旧两种格式)
-function normalizeMetadata(fragment) {
-    // 新格式: fragment.meta = {n, m, s, c}
-    // 旧格式: fragment.metadata = {fileName, mimeType, fileSize, checksum}
-    if (fragment.meta) {
-        // 转换新格式到标准格式
-        fragment.metadata = {
-            fileName: fragment.meta.n,
-            mimeType: fragment.meta.m,
-            fileSize: fragment.meta.s,
-            checksum: fragment.meta.c
-        };
-        delete fragment.meta; // 清理以避免混淆
-    }
-    return fragment;
-}
-
-function handleFileFragment(fragment) {
-    console.log('接收到文件片段:', fragment.index, '/', fragment.total);
-
-    // 标准化元数据格式
-    fragment = normalizeMetadata(fragment);
-
-    // T026: 创建或加载文件会话
-    if (fragment.index === 0 && fragment.metadata) {
-        // 创建新会话
-        if (!currentSession || currentSession.type !== 'file') {
-            currentSession = createSession(fragment);
-            console.log('创建文件传输会话:', currentSession.id);
-        }
-
-        fileMetadata = fragment.metadata;
-        fileTotalFragments = fragment.total;
-        fileFragments = {};
-
-        // 显示文件下载区域
-        document.getElementById('file-download-section').style.display = 'block';
-        document.getElementById('downloadFileName').textContent = fileMetadata.fileName;
-        document.getElementById('downloadFileSize').textContent = formatBytes(fileMetadata.fileSize);
-        document.getElementById('downloadFileType').textContent = fileMetadata.mimeType;
-
-        console.log('开始接收文件:', fileMetadata.fileName, fileMetadata.fileSize, 'bytes');
-    }
-
-    // 确保 fileTotalFragments 始终更新（不仅限于 fragment 0）
-    if (fragment.total > 0) fileTotalFragments = fragment.total;
-
-    // 存储片段数据
-    const isDuplicateFragment = fragment.index in fileFragments;
-    fileFragments[fragment.index] = fragment.data;
-
-    // T026: 更新会话并保存到 LocalStorage
-    if (currentSession) {
-        currentSession.receivedFragments[fragment.index] = fragment.data;
-        currentSession.totalFragments = fragment.total;
-        saveSession(currentSession);
-    }
-
-    // FIX: Update visual progress map for files
-    updateProgressMap(fragment.total, fileFragments, fragment.index);
-
-    // Show missing fragments button
-    var mfs = document.getElementById('missingFragmentsSection');
-    if (mfs) mfs.style.display = 'block';
-
-    // Update last-scanned info
-    const lsi = document.getElementById('lastScannedInfo');
-    if (lsi) lsi.textContent = isDuplicateFragment
-        ? `最后扫描: #${fragment.index + 1} (重复)`
-        : `最后扫描: #${fragment.index + 1} ✓ 新`;
-
-    // 更新进度
-    const receivedCount = Object.keys(fileFragments).length;
-    document.getElementById('fileProgressText').textContent = `${receivedCount} / ${fragment.total}`;
-    
-    // FIX: Also update the main scan progress indicator so the user sees progress in the camera view overlay
-    updateScanProgress(`📁 接收文件中: ${receivedCount}/${fragment.total}`, receivedCount, fragment.total);
-    updateProgressBar(receivedCount, fragment.total);
-
-    // 播放提示音
-    try {
-        const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmzQQ==');
-        audio.volume = 0.3;
-        audio.play();
-    } catch (e) {}
-
-    // 检查是否接收完成
-    if (receivedCount === fragment.total) {
-        completeFileTransfer();
-    }
-}
-
-// ========== T045 & T046: 完成文件传输并验证校验和 ==========
-function completeFileTransfer() {
-    console.log('文件接收完成，开始组装...');
-
-    // 按顺序组装所有片段
-    const orderedFragments = [];
-    for (let i = 0; i < fileTotalFragments; i++) {
-        if (fileFragments[i] === undefined) {
-            console.error('缺少片段:', i);
-            alert(`文件接收不完整，缺少第 ${i + 1} 片`);
-            return;
-        }
-        orderedFragments.push(fileFragments[i]);
-    }
-
-    const fullBase64 = orderedFragments.join('');
-    console.log('组装完成，base64长度:', fullBase64.length);
-
-    // T046: 验证校验和
-    if (fileMetadata && fileMetadata.checksum) {
-        const calculatedChecksum = calculateSimpleChecksum(fullBase64);
-        console.log('计算校验和:', calculatedChecksum);
-        console.log('预期校验和:', fileMetadata.checksum);
-
-        if (calculatedChecksum !== fileMetadata.checksum) {
-            console.error('校验和不匹配！文件可能损坏');
-            const errorDiv = document.getElementById('checksumError');
-            if (errorDiv) errorDiv.style.display = 'block';
-        } else {
-            console.log('校验和验证通过 ✓');
-        }
-    }
-
-    // 更新UI - 标记为完成
-    document.getElementById('fileProgress').innerHTML = '✅ <strong>文件接收完成！</strong>';
-    document.getElementById('downloadBtn').disabled = false;
-
-    // T027: 文件传输完成，清除会话（在用户下载后清除，这里暂不清除）
-    // 会话将在用户点击下载按钮后的 triggerFileDownload() 中清除
-
-    // 停止扫描
-    scanning = false;
-    stopScan();
-    setState('complete');
-
-    // 自动触发下载（可选）
-    // triggerFileDownload();
-}
-
-// Show missing fragments list
-function showMissingFragments() {
-    const listDiv = document.getElementById('missingFragmentsList');
-    if (!listDiv) return;
-    let missing = [];
-
-    if (fileTotalFragments > 0) {
-        // 文件模式 (0-based index)
-        for (let i = 0; i < fileTotalFragments; i++) {
-            if (!(i in fileFragments)) missing.push(i + 1); // 显示时 +1
-        }
-    } else if (totalChunks > 0) {
-        // 文本模式 (1-based index in chunks)
-        for (let i = 1; i <= totalChunks; i++) {
-            if (!(i in chunks)) missing.push(i);
-        }
-    }
-
-    if (missing.length === 0) {
-        listDiv.innerHTML = '<span style="color:var(--success);">✅ 所有片段已接收！</span>';
-    } else {
-        listDiv.innerHTML = '<strong style="color:var(--warning);">缺失 ' + missing.length + ' 片:</strong><br>' + missing.join(', ');
-    }
-    listDiv.style.display = 'block';
-}
-
-// Update Visual Progress Map (10-column grid with row/column labels)
-function updateProgressMap(total, receivedIndicesObj, justScannedIndex) {
-    const container = document.getElementById('progressMapContainer');
-    const map = document.getElementById('progressMap');
-    const stats = document.getElementById('mapStats');
-
-    // Show container if hidden
-    if (container.style.display === 'none') {
-        container.style.display = 'block';
-    }
-
-    const numRows = Math.ceil(total / 10);
-
-    // Rebuild grid if total changed
-    if (!map.querySelector('.progress-grid') || map.dataset.total !== String(total)) {
-        map.innerHTML = '';
-        map.dataset.total = String(total);
-
-        const grid = document.createElement('div');
-        grid.className = 'progress-grid';
-
-        // Header row: empty corner + column labels 0-9
-        const corner = document.createElement('div');
-        corner.className = 'grid-header';
-        grid.appendChild(corner);
-        for (let c = 0; c < 10; c++) {
-            const h = document.createElement('div');
-            h.className = 'grid-header';
-            h.textContent = String(c);
-            grid.appendChild(h);
-        }
-
-        // Data rows
-        for (let r = 0; r < numRows; r++) {
-            // Row label (tens+hundreds digit)
-            const label = document.createElement('div');
-            label.className = 'grid-rowlabel';
-            label.textContent = String(r);
-            grid.appendChild(label);
-
-            // 10 cells per row
-            for (let c = 0; c < 10; c++) {
-                const idx = r * 10 + c;
-                const cell = document.createElement('div');
-                cell.className = 'map-item';
-                if (idx < total) {
-                    cell.id = `map-item-${idx}`;
-                    cell.title = `#${idx + 1} [${r},${c}]`;
-                } else {
-                    cell.style.visibility = 'hidden';
-                }
-                grid.appendChild(cell);
-            }
-        }
-
-        map.appendChild(grid);
-    }
-
-    // Mark received items
-    Object.keys(receivedIndicesObj).forEach(index => {
-        const item = document.getElementById(`map-item-${index}`);
-        if (item && !item.classList.contains('received')) {
-            item.classList.add('received');
-        }
-    });
-
-    // Flash animation for just-scanned cell
-    if (justScannedIndex !== undefined) {
-        const prevMarker = map.querySelector('.last-scanned-marker');
-        if (prevMarker) prevMarker.classList.remove('last-scanned-marker');
-        const prevFlash = map.querySelector('.just-scanned');
-        if (prevFlash) prevFlash.classList.remove('just-scanned');
-
-        const el = document.getElementById(`map-item-${justScannedIndex}`);
-        if (el) {
-            el.classList.remove('just-scanned');
-            void el.offsetWidth; // force reflow to restart animation
-            el.classList.add('just-scanned');
-            el.classList.add('last-scanned-marker');
-            el.scrollIntoView({ block: 'nearest' });
-        }
-    }
-
-    // Update stats text
-    const receivedCount = Object.keys(receivedIndicesObj).length;
-    const percentage = Math.round((receivedCount / total) * 100);
-    stats.textContent = `${percentage}% (${receivedCount}/${total})`;
-}
-
-// 简单校验和计算（与sender.html保持一致）
 function calculateSimpleChecksum(data) {
     let hash = 0;
     for (let i = 0; i < data.length; i++) {
         const char = data.charCodeAt(i);
         hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32-bit integer
+        hash = hash & hash;
     }
     return Math.abs(hash).toString(16);
 }
 
-// ========== T018-T020: 会话管理工具函数（Session Management Utilities）==========
+// ============================================================
+// QR version calculator (workaround for QRCode.js auto-detect bug)
+// Binary mode capacity at each error correction level (bytes), versions 1-40
+// ============================================================
 
-// T020: UUID生成函数
-function generateUUID() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
+const QR_CAPACITY = {
+    L: [17,32,53,78,106,134,154,192,230,271,321,367,425,458,520,586,644,718,792,858,929,1003,1091,1171,1273,1367,1465,1528,1628,1732,1840,1952,2068,2188,2303,2431,2563,2699,2809,2953],
+    M: [14,26,42,62,84,106,122,152,180,213,251,287,331,362,412,450,504,560,624,666,711,779,857,911,997,1059,1125,1190,1264,1370,1452,1538,1628,1722,1809,1911,1989,2099,2213,2331],
+    Q: [11,20,32,46,60,74,86,108,130,151,177,203,241,258,292,322,364,394,442,482,509,565,611,661,715,751,805,868,908,982,1030,1112,1168,1228,1283,1351,1423,1499,1579,1663],
+    H: [7,14,24,34,44,58,64,84,98,119,137,155,177,194,220,250,280,310,338,382,403,439,461,511,535,593,625,658,698,742,790,842,898,958,983,1051,1093,1139,1219,1273]
+};
+
+function findMinVersion(byteLength, errorLevel) {
+    const caps = QR_CAPACITY[errorLevel] || QR_CAPACITY['H'];
+    for (let v = 0; v < caps.length; v++) {
+        if (caps[v] >= byteLength) return v + 1; // versions are 1-indexed
+    }
+    return 40; // fallback to max
+}
+
+function getUtf8ByteLength(str) {
+    let len = 0;
+    for (let i = 0; i < str.length; i++) {
+        const code = str.charCodeAt(i);
+        if (code > 65535) len += 4;
+        else if (code > 2047) len += 3;
+        else if (code > 127) len += 2;
+        else len += 1;
+    }
+    // QRCode.js adds UTF-8 BOM (3 bytes) if UTF-8 length differs from string length
+    if (len !== str.length) len += 3;
+    return len;
+}
+
+// ============================================================
+// QR Bridge: encode with QRCode.js → decode with jsQR
+// ============================================================
+
+function encodeAndDecode(jsonString, errorLevel) {
+    const workspace = document.getElementById('qrWorkspace');
+    const container = document.createElement('div');
+    workspace.appendChild(container);
+
+    const levelMap = { 'L': QRCode.CorrectLevel.L, 'M': QRCode.CorrectLevel.M, 'Q': QRCode.CorrectLevel.Q, 'H': QRCode.CorrectLevel.H };
+    const utf8Len = getUtf8ByteLength(jsonString);
+    const version = findMinVersion(utf8Len, errorLevel);
+
+    try {
+        new QRCode(container, {
+            text: jsonString,
+            width: Math.max(400, version * 20),
+            height: Math.max(400, version * 20),
+            typeNumber: version,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: levelMap[errorLevel] || QRCode.CorrectLevel.H
+        });
+    } catch (e) {
+        workspace.removeChild(container);
+        return { success: false, error: 'QR encode failed (v' + version + ', ' + utf8Len + 'B UTF-8): ' + e.message, jsonLength: jsonString.length };
+    }
+
+    const canvas = container.querySelector('canvas');
+    if (!canvas) {
+        workspace.removeChild(container);
+        return { success: false, error: 'No canvas generated' };
+    }
+
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const result = jsQR(imageData.data, canvas.width, canvas.height);
+
+    workspace.removeChild(container);
+
+    if (!result) {
+        return { success: false, error: 'jsQR decode failed (returned null)', jsonLength: jsonString.length };
+    }
+
+    // Strip UTF-8 BOM that QRCode.js adds for non-ASCII text
+    let decoded = result.data;
+    if (decoded.charCodeAt(0) === 0xFEFF) {
+        decoded = decoded.substring(1);
+    }
+    return { success: true, data: decoded };
+}
+
+// ============================================================
+// Receiver logic (simplified reassembly)
+// ============================================================
+
+function reassembleText(decodedJsonStrings) {
+    const fragments = decodedJsonStrings.map(s => JSON.parse(s));
+    fragments.sort((a, b) => a.i - b.i);
+
+    let result = '';
+    for (const f of fragments) {
+        let chunk = f.d;
+        if (f.e === 'b64') {
+            chunk = decodeURIComponent(escape(atob(f.d)));
+        }
+        result += chunk;
+    }
+    return result;
+}
+
+function reassembleFile(decodedJsonStrings) {
+    const fragments = decodedJsonStrings.map(s => JSON.parse(s));
+    fragments.sort((a, b) => a.index - b.index);
+
+    let metadata = null;
+    const dataChunks = [];
+    for (const f of fragments) {
+        if (f.meta) {
+            metadata = { fileName: f.meta.n, mimeType: f.meta.m, fileSize: f.meta.s, checksum: f.meta.c };
+        }
+        dataChunks[f.index] = f.data;
+    }
+
+    const fullBase64 = dataChunks.join('');
+    const binaryString = atob(fullBase64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return { metadata, bytes };
+}
+
+// ============================================================
+// Logging
+// ============================================================
+
+function log(msg, cls) {
+    const area = document.getElementById('logArea');
+    area.style.display = 'block';
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = msg;
+    area.appendChild(line);
+    area.scrollTop = area.scrollHeight;
+}
+
+// ============================================================
+// Test definitions
+// ============================================================
+
+const tests = [
+    { id: 'T1', name: '短文本 (ASCII)', type: 'text' },
+    { id: 'T2', name: '中文文本 (UTF-8)', type: 'text' },
+    { id: 'T3', name: '长文本 (多片)', type: 'text' },
+    { id: 'T4', name: '文件模拟 (1KB)', type: 'file' },
+    { id: 'T5', name: '中文文件名 (元数据开销)', type: 'file' },
+    { id: 'T6a', name: '纠错 L + 中文文件名', type: 'file' },
+    { id: 'T6b', name: '纠错 M + 中文文件名', type: 'file' },
+    { id: 'T6c', name: '纠错 Q + 中文文件名', type: 'file' },
+    { id: 'T6d', name: '纠错 H + 中文文件名', type: 'file' },
+];
+
+// Render test list
+function renderTests() {
+    const list = document.getElementById('testList');
+    list.innerHTML = '';
+    for (const t of tests) {
+        const row = document.createElement('div');
+        row.className = 'test-row';
+        row.id = 'row-' + t.id;
+        row.innerHTML = `<span class="test-icon" id="icon-${t.id}">⏳</span>
+            <span class="test-name">${t.id}: ${t.name}</span>
+            <span class="test-detail" id="detail-${t.id}">—</span>`;
+        list.appendChild(row);
+    }
+}
+
+function setTestResult(id, pass, detail) {
+    document.getElementById('icon-' + id).textContent = pass ? '✅' : '❌';
+    const d = document.getElementById('detail-' + id);
+    d.textContent = detail;
+    d.className = 'test-detail ' + (pass ? 'pass' : 'fail');
+}
+
+function setTestRunning(id) {
+    document.getElementById('icon-' + id).textContent = '🔄';
+    document.getElementById('detail-' + id).textContent = '运行中...';
+}
+
+// ============================================================
+// Helper: generate random bytes
+// ============================================================
+
+function randomBytes(size) {
+    const arr = new Uint8Array(size);
+    for (let i = 0; i < size; i++) arr[i] = Math.floor(Math.random() * 256);
+    return arr;
+}
+
+function uint8ToBase64(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+}
+
+function arraysEqual(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) { if (a[i] !== b[i]) return false; }
+    return true;
+}
+
+// ============================================================
+// Test implementations
+// ============================================================
+
+function testTextPipeline(id, text, errorLevel) {
+    setTestRunning(id);
+    const start = performance.now();
+    const chunkSize = text.length > 1000 ? Math.min(50, Math.max(25, Math.floor(text.length / 25)))
+                    : text.length > 500 ? 25 : 15;
+
+    log(`[${id}] 文本长度=${text.length}, 分片大小=${chunkSize}, 纠错=${errorLevel}`);
+
+    const chunks = chunkText(text, chunkSize, errorLevel);
+    log(`[${id}] 分片数: ${chunks.length}`);
+
+    // Encode each chunk as sender does (Base64)
+    const fragmentJsons = chunks.map((chunk, index) => {
+        const encodedChunk = btoa(unescape(encodeURIComponent(chunk)));
+        return JSON.stringify({ i: index + 1, t: chunks.length, d: encodedChunk, e: 'b64' });
     });
-}
 
-// T018: 创建会话
-function createSession(fragment) {
-    // 标准化元数据格式
-    fragment = normalizeMetadata(fragment);
-
-    const session = {
-        id: generateUUID(),
-        type: fragment.type || 'text', // 'text' or 'file'
-        createdAt: Date.now(),
-        totalFragments: fragment.total,
-        receivedFragments: {},
-        metadata: null
-    };
-
-    // 如果是文件类型且有元数据
-    if (fragment.type === 'file' && fragment.index === 0 && fragment.metadata) {
-        session.metadata = fragment.metadata;
-    }
-
-    return session;
-}
-
-// T018: 添加片段到会话
-function addFragment(session, fragment) {
-    session.receivedFragments[fragment.index] = fragment.data;
-    return session;
-}
-
-// T018: 检查会话是否完成
-function isSessionComplete(session) {
-    const receivedCount = Object.keys(session.receivedFragments).length;
-    return receivedCount === session.totalFragments;
-}
-
-// T018: 检查会话是否过期（24小时 TTL）
-function isSessionExpired(session) {
-    const TTL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-    return (Date.now() - session.createdAt) > TTL;
-}
-
-// T018: 重组数据
-function reassembleData(session) {
-    const orderedFragments = [];
-    for (let i = 0; i < session.totalFragments; i++) {
-        if (session.receivedFragments[i] === undefined) {
-            console.error('缺少片段:', i);
-            return null;
+    // QR encode → decode each fragment
+    const decoded = [];
+    for (let i = 0; i < fragmentJsons.length; i++) {
+        const r = encodeAndDecode(fragmentJsons[i], errorLevel);
+        if (!r.success) {
+            const msg = `片${i + 1}失败: ${r.error} (JSON长度=${r.jsonLength || '?'})`;
+            log(`[${id}] ❌ ${msg}`, 'err');
+            setTestResult(id, false, msg);
+            return false;
         }
-        orderedFragments.push(session.receivedFragments[i]);
+        decoded.push(r.data);
     }
-    return orderedFragments.join('');
-}
 
-// ========== T019: LocalStorage 工具函数 ==========
+    // Reassemble
+    const result = reassembleText(decoded);
+    const elapsed = (performance.now() - start).toFixed(0);
 
-// 保存会话到 LocalStorage
-function saveSession(session) {
-    try {
-        localStorage.setItem('qr_transfer_session', JSON.stringify(session));
-        console.log('会话已保存:', session.id);
-    } catch (e) {
-        console.error('保存会话失败:', e);
-        if (e.name === 'QuotaExceededError' || e.code === 22) {
-            const statusEl = document.getElementById('scanProgress');
-            if (statusEl) {
-                statusEl.textContent = '⚠️ 存储空间不足，会话无法自动保存（扫描仍可继续）';
-            }
-        }
-    }
-}
-
-// 从 LocalStorage 加载会话
-function loadSession() {
-    try {
-        const sessionData = localStorage.getItem('qr_transfer_session');
-        if (!sessionData) return null;
-
-        const session = JSON.parse(sessionData);
-
-        // 检查 TTL
-        if (isSessionExpired(session)) {
-            console.log('会话已过期，清除');
-            clearSession();
-            return null;
-        }
-
-        console.log('会话已加载:', session.id);
-        return session;
-    } catch (e) {
-        console.error('加载会话失败:', e);
-        return null;
-    }
-}
-
-// 清除会话
-function clearSession() {
-    try {
-        localStorage.removeItem('qr_transfer_session');
-        console.log('会话已清除');
-    } catch (e) {
-        console.error('清除会话失败:', e);
-    }
-}
-
-// ========== T023-T025: 会话恢复逻辑 ==========
-
-// 全局会话变量
-let currentSession = null;
-
-// T023: 检查会话恢复（在页面加载时调用）
-function checkSessionRecovery() {
-    const session = loadSession();
-
-    if (session && !isSessionExpired(session)) {
-        currentSession = session;
-        showRecoveryBanner(session);
-        // Show recovery state with details
-        var detail = document.getElementById('recovery-detail');
-        if (detail) {
-            var cnt = Object.keys(session.receivedFragments).length;
-            var tot = session.totalFragments;
-            if (session.type === 'file' && session.metadata) {
-                detail.textContent = session.metadata.fileName + ' — ' + cnt + '/' + tot + ' 片';
-            } else {
-                detail.textContent = '已接收 ' + cnt + '/' + tot + ' 片';
-            }
-        }
-        setState('recovery');
+    if (result === text) {
+        log(`[${id}] ✅ 通过 (${chunks.length}片, ${elapsed}ms)`, 'ok');
+        setTestResult(id, true, `${chunks.length}片 · ${elapsed}ms`);
+        return true;
     } else {
-        console.log('无可恢复的会话');
+        const diffPos = [...result].findIndex((c, i) => c !== text[i]);
+        log(`[${id}] ❌ 内容不匹配 (首个差异位置: ${diffPos})`, 'err');
+        setTestResult(id, false, `内容不匹配 @${diffPos}`);
+        return false;
     }
 }
 
-// T024: 显示恢复横幅
-function showRecoveryBanner(session) {
-    const banner = document.getElementById('recovery-banner');
-    const message = document.getElementById('recovery-message');
+function testFilePipeline(id, fileName, fileType, fileBytes, errorLevel) {
+    setTestRunning(id);
+    const start = performance.now();
 
-    const receivedCount = Object.keys(session.receivedFragments).length;
-    const total = session.totalFragments;
+    log(`[${id}] 文件="${fileName}", 大小=${fileBytes.length}B, 纠错=${errorLevel}`);
 
-    let messageText = '';
+    const base64 = uint8ToBase64(fileBytes);
+    const checksum = calculateSimpleChecksum(base64);
+    const mockFile = { name: fileName, type: fileType, size: fileBytes.length };
 
-    if (session.type === 'file' && session.metadata) {
-        // 文件传输恢复消息 (T047)
-        const fileName = session.metadata.fileName;
-        messageText = `🔄 <strong>已恢复文件传输:</strong> ${fileName} - 已接收 ${receivedCount}/${total} 片`;
-    } else {
-        // 文本传输恢复消息
-        messageText = `🔄 <strong>已恢复传输会话:</strong> 已接收 ${receivedCount}/${total} 片`;
-    }
+    const fragments = chunkFile(mockFile, base64, checksum, errorLevel);
+    log(`[${id}] 分片数: ${fragments.length}, 第1片JSON长度: ${JSON.stringify(fragments[0]).length}`);
 
-    message.innerHTML = messageText;
-    banner.style.display = 'flex';
-    document.body.classList.add('has-recovery-banner');
-
-    console.log('显示恢复横幅:', session.id);
-}
-
-// 继续会话（用户点击"继续传输"）
-function continueSession() {
-    const banner = document.getElementById('recovery-banner');
-    banner.style.display = 'none';
-    document.body.classList.remove('has-recovery-banner');
-
-    // Restore state and start scanning
-    hasReceivedFirstFragment = true;
-
-    // 恢复UI状态
-    if (currentSession) {
-        const receivedCount = Object.keys(currentSession.receivedFragments).length;
-        const total = currentSession.totalFragments;
-
-        if (currentSession.type === 'file' && currentSession.metadata) {
-            // 恢复文件传输UI
-            document.getElementById('file-download-section').style.display = 'block';
-            document.getElementById('downloadFileName').textContent = currentSession.metadata.fileName;
-            document.getElementById('downloadFileSize').textContent = formatBytes(currentSession.metadata.fileSize);
-            document.getElementById('downloadFileType').textContent = currentSession.metadata.mimeType;
-            document.getElementById('fileProgressText').textContent = `${receivedCount} / ${total}`;
-
-            // 恢复全局变量
-            fileFragments = currentSession.receivedFragments;
-            fileMetadata = currentSession.metadata;
-            fileTotalFragments = total;
-        } else {
-            // 恢复文本传输UI
-            chunks = currentSession.receivedFragments;
-            totalChunks = total;
-            updateOutput();
-            updateScanProgress('🔍 继续扫描...', receivedCount, total);
+    // QR encode → decode each fragment
+    const decoded = [];
+    for (let i = 0; i < fragments.length; i++) {
+        const jsonStr = JSON.stringify(fragments[i]);
+        const r = encodeAndDecode(jsonStr, errorLevel);
+        if (!r.success) {
+            const msg = `片${i}失败: ${r.error} (JSON=${jsonStr.length}B)`;
+            log(`[${id}] ❌ ${msg}`, 'err');
+            setTestResult(id, false, msg);
+            return false;
         }
-
-        console.log('会话已恢复，继续传输');
+        decoded.push(r.data);
     }
 
-    // Start scanning to continue receiving
-    startScan();
-}
+    // Reassemble
+    const reassembled = reassembleFile(decoded);
+    const elapsed = (performance.now() - start).toFixed(0);
 
-// T025: 清除并重新开始
-function clearAndRestart() {
-    document.body.classList.remove('has-recovery-banner');
-    resetToReady();
-    console.log('会话已清除，重新开始');
-}
-
-// 格式化字节大小
-function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-}
-
-// ========== T047: 触发文件下载（iOS Safari兼容）==========
-function triggerFileDownload() {
-    if (!fileMetadata) {
-        alert('没有可下载的文件');
-        return;
+    // Verify metadata
+    if (!reassembled.metadata) {
+        log(`[${id}] ❌ 元数据缺失`, 'err');
+        setTestResult(id, false, '元数据缺失');
+        return false;
+    }
+    if (reassembled.metadata.fileName !== fileName) {
+        log(`[${id}] ❌ 文件名不匹配: "${reassembled.metadata.fileName}" vs "${fileName}"`, 'err');
+        setTestResult(id, false, '文件名不匹配');
+        return false;
+    }
+    if (reassembled.metadata.checksum !== checksum) {
+        log(`[${id}] ❌ 校验和不匹配`, 'err');
+        setTestResult(id, false, '校验和不匹配');
+        return false;
     }
 
-    try {
-        // 组装完整base64
-        const orderedFragments = [];
-        for (let i = 0; i < fileTotalFragments; i++) {
-            orderedFragments.push(fileFragments[i]);
-        }
-        const fullBase64 = orderedFragments.join('');
-
-        // 将base64转换为二进制数据
-        const binaryString = atob(fullBase64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
-
-        // 创建Blob
-        const blob = new Blob([bytes], { type: fileMetadata.mimeType });
-
-        // 创建下载链接（iOS Safari兼容方式）
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileMetadata.fileName;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-
-        // 触发下载
-        a.click();
-
-        // 清理（延迟移除以确保下载开始）
-        setTimeout(() => {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }, 100);
-
-        console.log('文件下载已触发:', fileMetadata.fileName);
-
-        // T027: 文件下载成功，清除会话
-        clearSession();
-        currentSession = null;
-        console.log('文件下载完成，会话已清除');
-
-        // 更新按钮文字
-        const btn = document.getElementById('downloadBtn');
-        const originalText = btn.innerHTML;
-        btn.innerHTML = '✅ 下载已开始';
-        setTimeout(() => {
-            btn.innerHTML = originalText;
-        }, 2000);
-
-    } catch (error) {
-        console.error('文件下载失败:', error);
-        alert('文件下载失败: ' + error.message);
+    // Verify bytes
+    if (!arraysEqual(reassembled.bytes, fileBytes)) {
+        log(`[${id}] ❌ 文件内容不匹配 (原始=${fileBytes.length}B, 重组=${reassembled.bytes.length}B)`, 'err');
+        setTestResult(id, false, '文件内容不匹配');
+        return false;
     }
+
+    log(`[${id}] ✅ 通过 (${fragments.length}片, ${elapsed}ms)`, 'ok');
+    setTestResult(id, true, `${fragments.length}片 · ${elapsed}ms`);
+    return true;
 }
 
-function scan() {
-    if (!scanning) return;
-    
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        context.drawImage(video, 0, 0);
-        
-        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-        
-        // 检查jsQR是否可用
-        if (typeof jsQR === 'undefined') {
-            console.error('jsQR库未加载');
-            document.getElementById('output').textContent = 'jsQR库未正确加载，请刷新页面';
-            return;
-        }
-        
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-        
-        if (code) {
-            console.log('检测到QR码:', code.data);
-            // Transition to receiving state on first detection
-            if (!hasReceivedFirstFragment) {
-                hasReceivedFirstFragment = true;
-                setState('receiving');
-            }
-            try {
-                // Strip UTF-8 BOM that QRCode.js adds for non-ASCII content
-                let rawData = code.data;
-                if (rawData.charCodeAt(0) === 0xFEFF) {
-                    rawData = rawData.substring(1);
+// ============================================================
+// Main test runner
+// ============================================================
+
+async function runAllTests() {
+    const btn = document.getElementById('runBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ 运行中...';
+    document.getElementById('logArea').innerHTML = '';
+    document.getElementById('logArea').style.display = 'block';
+    document.getElementById('summary').style.display = 'none';
+    renderTests();
+
+    let passed = 0;
+    const total = tests.length;
+
+    // Use setTimeout to allow UI updates between tests
+    async function runNext(i) {
+        return new Promise(resolve => {
+            setTimeout(() => {
+                let ok = false;
+                const fileData1KB = randomBytes(1024);
+                const cnFileName = '微信图片_20260202172938_测试.png';
+
+                switch (tests[i].id) {
+                    case 'T1':
+                        ok = testTextPipeline('T1', 'Hello World! This is a QR transfer test.', 'H');
+                        break;
+                    case 'T2':
+                        ok = testTextPipeline('T2', '你好世界，这是QR传输测试。中文字符编码验证：一二三四五六七八九十。', 'H');
+                        break;
+                    case 'T3': {
+                        const longText = '这是一段较长的测试文本，用于验证多片分片和重组功能。ABCDEFGHIJKLMNOPQRSTUVWXYZ。'.repeat(20);
+                        ok = testTextPipeline('T3', longText, 'H');
+                        break;
+                    }
+                    case 'T4':
+                        ok = testFilePipeline('T4', 'test_file.png', 'image/png', fileData1KB, 'H');
+                        break;
+                    case 'T5':
+                        ok = testFilePipeline('T5', cnFileName, 'image/png', fileData1KB, 'H');
+                        break;
+                    case 'T6a':
+                        ok = testFilePipeline('T6a', cnFileName, 'image/png', fileData1KB, 'L');
+                        break;
+                    case 'T6b':
+                        ok = testFilePipeline('T6b', cnFileName, 'image/png', fileData1KB, 'M');
+                        break;
+                    case 'T6c':
+                        ok = testFilePipeline('T6c', cnFileName, 'image/png', fileData1KB, 'Q');
+                        break;
+                    case 'T6d':
+                        ok = testFilePipeline('T6d', cnFileName, 'image/png', fileData1KB, 'H');
+                        break;
                 }
-                const data = JSON.parse(rawData);
-
-                // T043: 检测fragment类型并路由
-                if (data.type === 'file') {
-                    // 文件传输模式
-                    handleFileFragment(data);
-                } else if (data.i !== undefined && data.t && data.d) {
-                    // 文本传输模式（兼容旧格式）
-                    handleTextFragment(data);
-                } else {
-                    // 不是我们格式的QR码，显示原始数据
-                    console.log('非分片QR码，原始数据:', code.data);
-                    document.getElementById('output').textContent = code.data;
-                    document.getElementById('copyBtn').style.display = 'block'; // 显示复制按钮
-                }
-            } catch (e) {
-                // JSON解析失败，显示原始数据
-                console.log('JSON解析失败，显示原始数据:', code.data);
-                document.getElementById('output').textContent = code.data;
-                document.getElementById('copyBtn').style.display = 'block'; // 显示复制按钮
-            }
-        }
+                if (ok) passed++;
+                resolve();
+            }, 50);
+        });
     }
-    
-    requestAnimationFrame(scan);
-}
 
-function updateOutput() {
-    const received = Object.keys(chunks).length;
-    const statusEl = document.getElementById('status');
-    
-    if (received > 0) {
-        // 显示进度
-        statusEl.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span>📦 已接收片段: ${received}/${totalChunks}</span>
-                <span style="font-size: 12px;">${Math.round(received/totalChunks*100)}%</span>
-            </div>
-        `;
-        
-        // 显示已接收的片段列表
-        const chunksListEl = document.getElementById('chunksList');
-        const chunksPreviewEl = document.getElementById('chunksPreview');
-        
-        if (chunksListEl && chunksPreviewEl) {
-            chunksListEl.style.display = 'block';
-            
-            const sortedChunks = Object.keys(chunks).sort((a, b) => parseInt(a) - parseInt(b));
-            const chunkNumbers = Array.from({length: totalChunks}, (_, i) => i + 1);
-            
-            chunksPreviewEl.innerHTML = chunkNumbers.map(num => {
-                const received = chunks[num];
-                return `<span style="
-                    display: inline-block; 
-                    margin: 2px; 
-                    padding: 2px 6px; 
-                    border-radius: 3px; 
-                    font-size: 11px;
-                    background: ${received ? 'rgba(48,209,88,0.15)' : 'rgba(255,69,58,0.15)'};
-                    color: ${received ? 'var(--success)' : 'var(--error)'};
-                ">${num}</span>`;
-            }).join('');
-        }
-        
-        // 显示已接收内容的预览
-        const preview = Object.keys(chunks)
-            .sort((a, b) => parseInt(a) - parseInt(b))
-            .map(key => chunks[key])
-            .join('');
-        if (preview) {
-            const truncatedPreview = preview.length > 200 ? preview.substring(0, 200) + '...' : preview;
-            document.getElementById('output').innerHTML = `
-                <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: 8px;">实时预览 (${preview.length}字符):</div>
-                <div>${truncatedPreview}</div>
-            `;
-        }
+    for (let i = 0; i < total; i++) {
+        await runNext(i);
     }
-}
 
-// 视频控制函数
-function toggleVideo() {
-    const video = document.getElementById('video');
-    if (video.classList.contains('hidden')) {
-        video.classList.remove('hidden');
+    // Summary
+    const summaryEl = document.getElementById('summary');
+    summaryEl.style.display = 'block';
+    if (passed === total) {
+        summaryEl.className = 'summary pass';
+        summaryEl.textContent = `✅ 全部通过 ${passed}/${total}`;
     } else {
-        video.classList.add('hidden');
-    }
-}
-
-function minimizeVideo() {
-    const video = document.getElementById('video');
-    video.classList.remove('hidden');
-    video.classList.add('minimized');
-}
-
-function normalizeVideo() {
-    const video = document.getElementById('video');
-    video.classList.remove('hidden', 'minimized');
-}
-
-// ========== T023: 页面加载时检查会话恢复 ==========
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('页面加载完成，检查会话恢复...');
-    checkSessionRecovery();
-});
-
-// ===== Bilingual Support =====
-(function() {
-    var stored = null;
-    try { stored = localStorage.getItem('qr_lang'); } catch(e) {}
-    var lang = stored || ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
-
-    function applyLang(l) {
-        lang = l;
-        try { localStorage.setItem('qr_lang', l); } catch(e) {}
-        document.querySelectorAll('[data-zh]').forEach(function(el) {
-            el.textContent = el.getAttribute('data-' + l) || el.getAttribute('data-en');
-        });
-        document.querySelectorAll('#langToggle button').forEach(function(btn) {
-            btn.classList.toggle('active', btn.getAttribute('data-lang') === l);
-        });
-        document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en';
+        summaryEl.className = 'summary fail';
+        summaryEl.textContent = `❌ ${passed}/${total} 通过，${total - passed} 失败`;
     }
 
-    var toggle = document.getElementById('langToggle');
-    if (toggle) {
-        toggle.addEventListener('click', function(e) {
-            if (e.target.tagName === 'BUTTON') {
-                applyLang(e.target.getAttribute('data-lang'));
-            }
-        });
-    }
+    btn.disabled = false;
+    btn.textContent = '▶ 重新运行';
+    log(`\n===== 测试完成: ${passed}/${total} 通过 =====`, passed === total ? 'ok' : 'err');
+}
 
-    applyLang(lang);
-})();
+// Init
+renderTests();
 </script>
-<div style="text-align:center; padding:20px 0 12px; font-size:11px; color:var(--text-muted);">
-    <span data-zh="最后更新" data-en="Last updated">最后更新</span>: <span id="buildTime"></span>
-</div>
-<script>document.getElementById('buildTime').textContent=new Date('2026-02-03T02:38:00Z').toLocaleString();</script>
 </body>
 </html>
