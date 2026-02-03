@@ -10217,11 +10217,14 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 // ============================================================
 
 function getChunkSizes(errorLevel) {
+    // Target max QR v10 for rest fragments (reliable phone scanning)
+    // v10 capacity: L=271, M=213, Q=151, H=119 bytes
+    // JSON wrapper overhead: ~48 bytes → data budget = capacity - 48
     const sizes = {
-        'L': { first: 350, rest: 500 },
-        'M': { first: 300, rest: 400 },
-        'Q': { first: 200, rest: 300 },
-        'H': { first: 150, rest: 200 }
+        'L': { rest: 220 },
+        'M': { rest: 160 },
+        'Q': { rest: 100 },
+        'H': { rest: 70 }
     };
     return sizes[errorLevel] || sizes['H'];
 }
@@ -10251,30 +10254,31 @@ function chunkText(text, maxSize, errorLevel) {
 function chunkFile(file, pureBase64, checksum, errorLevel) {
     const base64 = pureBase64;
     const cs = getChunkSizes(errorLevel);
-    const fragmentSize = cs.rest;
     const fragments = [];
+
+    // Fragment 0: metadata only, no base64 data (keeps QR at v11-v12)
     const metaObj = {
         n: file.name,
         m: file.type || 'application/octet-stream',
         s: file.size,
         c: checksum
     };
-    const metaOverhead = JSON.stringify(metaObj).length + ',"meta":'.length;
-    const firstFragmentSize = Math.max(50, cs.first - metaOverhead);
-    log(`  第1片base64预算: ${firstFragmentSize} 字节 (元数据开销: ${metaOverhead} 字节)`);
+    fragments.push({
+        type: "file", index: 0, total: 0, data: "", meta: metaObj
+    });
 
+    // Fragment 1+: data only, targeting QR v10
     let position = 0;
-    let index = 0;
     while (position < base64.length) {
-        const chunkSize = (index === 0) ? firstFragmentSize : fragmentSize;
-        const chunk = base64.substr(position, chunkSize);
-        const fragment = { type: "file", index: index, total: 0, data: chunk };
-        if (index === 0) fragment.meta = metaObj;
-        fragments.push(fragment);
-        position += chunkSize;
-        index++;
+        const chunk = base64.substr(position, cs.rest);
+        fragments.push({
+            type: "file", index: fragments.length, total: 0, data: chunk
+        });
+        position += cs.rest;
     }
+
     fragments.forEach(f => f.total = fragments.length);
+    log(`  分片: ${fragments.length}片 (第1片=元数据, 每片数据≤${cs.rest}字节)`);
     return fragments;
 }
 

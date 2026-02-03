@@ -691,11 +691,14 @@ function handleFileUpload(file) {
 // Get chunk sizes based on error correction level
 // Higher correction → smaller chunks → more QR codes but similar density
 function getChunkSizes(errorLevel) {
+    // Target max QR v10 for rest fragments (reliable phone scanning)
+    // v10 capacity: L=271, M=213, Q=151, H=119 bytes
+    // JSON wrapper overhead: ~48 bytes → data budget = capacity - 48
     const sizes = {
-        'L': { first: 350, rest: 500 },
-        'M': { first: 300, rest: 400 },
-        'Q': { first: 200, rest: 300 },
-        'H': { first: 150, rest: 200 }
+        'L': { rest: 220 },
+        'M': { rest: 160 },
+        'Q': { rest: 100 },
+        'H': { rest: 70 }
     };
     return sizes[errorLevel] || sizes['H'];
 }
@@ -705,21 +708,9 @@ function estimateQRCount(file) {
     const cs = getChunkSizes(errorLevel);
     const base64Size = file.size * 1.37; // Base64 编码会增加约37%
 
-    // Estimate metadata overhead for first fragment (same logic as chunkFile)
-    const metaOverhead = JSON.stringify({
-        n: file.name,
-        m: file.type || 'application/octet-stream',
-        s: file.size,
-        c: '00000000'
-    }).length + ',"meta":'.length;
-    const firstSize = Math.max(50, cs.first - metaOverhead);
-
-    let remainingSize = base64Size - firstSize;
-    let qrCount = 1; // 第一片
-
-    if (remainingSize > 0) {
-        qrCount += Math.ceil(remainingSize / cs.rest);
-    }
+    // Fragment 0 = metadata only (no data), rest = data chunks
+    let qrCount = 1; // Fragment 0: metadata
+    qrCount += Math.ceil(base64Size / cs.rest); // Data fragments
 
     const scanTime = Math.ceil(qrCount * 2 / 60); // 假设每个QR码扫描需要2秒
 
@@ -793,59 +784,44 @@ function generateFileQR() {
 
 // Chunk File (T038)
 function chunkFile(file, pureBase64, checksum) {
-    // base64 is already stripped in generateFileQR
     const base64 = pureBase64;
-
-    // Chunk sizes based on error correction level
     const errorLevel = document.getElementById('errorLevel').value;
     const cs = getChunkSizes(errorLevel);
-    const fragmentSize = cs.rest;
     const fragments = [];
 
-    // Calculate first fragment's metadata JSON overhead so we can
-    // reduce the base64 data portion accordingly. This ensures
-    // fragment 0's total JSON size stays within QR capacity.
+    // Fragment 0: metadata only, no base64 data.
+    // This keeps fragment 0 at QR v11-v12 (61-65 modules) instead of v15+.
     const metaObj = {
         n: file.name,
         m: file.type || 'application/octet-stream',
         s: file.size,
         c: checksum
     };
-    // Estimate overhead: {"type":"file","index":0,"total":999,"data":"","meta":{...}}
-    // vs a normal fragment: {"type":"file","index":1,"total":999,"data":"..."}
-    const metaOverhead = JSON.stringify(metaObj).length + ',"meta":'.length;
-    const firstFragmentSize = Math.max(50, cs.first - metaOverhead);
-    console.log(`第1片base64预算: ${firstFragmentSize} 字节 (元数据开销: ${metaOverhead} 字节)`);
+    fragments.push({
+        type: "file",
+        index: 0,
+        total: 0,
+        data: "",
+        meta: metaObj
+    });
 
+    // Fragment 1+: data only, targeting QR v10 (57x57 modules)
     let position = 0;
-    let index = 0;
-
     while (position < base64.length) {
-        // Use smaller size for first fragment (has metadata), normal size for others
-        const chunkSize = (index === 0) ? firstFragmentSize : fragmentSize;
-        const chunk = base64.substr(position, chunkSize);
-
-        const fragment = {
+        const chunk = base64.substr(position, cs.rest);
+        fragments.push({
             type: "file",
-            index: index,
-            total: 0, // Will be set after loop
+            index: fragments.length,
+            total: 0,
             data: chunk
-        };
-
-        // Add metadata to first fragment only (T038)
-        // Use shortened keys to reduce JSON size
-        if (index === 0) {
-            fragment.meta = metaObj;
-        }
-
-        fragments.push(fragment);
-        position += chunkSize;
-        index++;
+        });
+        position += cs.rest;
     }
 
     // Set total count
     fragments.forEach(f => f.total = fragments.length);
 
+    console.log(`文件分片: ${fragments.length}片 (第1片=元数据, 第2-${fragments.length}片=数据, 每片≤${cs.rest}字节)`);
     return fragments;
 }
 
