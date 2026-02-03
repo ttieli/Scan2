@@ -294,6 +294,7 @@
         <div class="footer">
             <p data-zh="所有数据仅在浏览器本地处理，不会上传至任何服务器" data-en="All data is processed locally in your browser — nothing is uploaded"></p>
             <p style="margin-top: 6px;">&copy; 2025 QR Transfer &middot; <a href="https://github.com/ttieli/Scan2" target="_blank">GitHub</a> &middot; MIT License</p>
+            <p style="margin-top: 4px;"><span data-zh="最后更新" data-en="Last updated">最后更新</span>: <span id="buildTime"></span></p>
         </div>
     </div>
 
@@ -324,5 +325,6 @@
         applyLang(lang);
     })();
     </script>
+    <script>document.getElementById('buildTime').textContent=new Date('2026-02-03T22:00:00Z').toLocaleString();</script>
 </body>
 </html>
