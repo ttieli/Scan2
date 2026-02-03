@@ -10565,6 +10565,7 @@ function resetToReady() {
     fileFragments = {};
     fileMetadata = null;
     fileTotalFragments = 0;
+    fileTransferComplete = false;
     hasReceivedFirstFragment = false;
 
     // Reset UI elements
@@ -10850,6 +10851,7 @@ function handleTextFragment(data) {
 let fileFragments = {}; // 存储文件片段
 let fileMetadata = null; // 文件元数据
 let fileTotalFragments = 0; // 文件总片数
+let fileTransferComplete = false; // 文件传输是否已完成
 
 // 辅助函数：标准化元数据格式 (支持新旧两种格式)
 function normalizeMetadata(fragment) {
@@ -10869,6 +10871,9 @@ function normalizeMetadata(fragment) {
 }
 
 function handleFileFragment(fragment) {
+    // 如果文件传输已完成，忽略后续扫描（防止循环模式重复处理）
+    if (fileTransferComplete) return;
+
     console.log('接收到文件片段:', fragment.index, '/', fragment.total);
 
     // 标准化元数据格式
@@ -10876,23 +10881,31 @@ function handleFileFragment(fragment) {
 
     // T026: 创建或加载文件会话
     if (fragment.index === 0 && fragment.metadata) {
-        // 创建新会话
-        if (!currentSession || currentSession.type !== 'file') {
-            currentSession = createSession(fragment);
-            console.log('创建文件传输会话:', currentSession.id);
+        // 判断是否为新文件传输（与当前文件不同）
+        const isNewTransfer = !fileMetadata ||
+            fileMetadata.fileName !== fragment.metadata.fileName ||
+            fileMetadata.fileSize !== fragment.metadata.fileSize ||
+            fileMetadata.checksum !== fragment.metadata.checksum;
+
+        if (isNewTransfer) {
+            // 创建新会话
+            if (!currentSession || currentSession.type !== 'file') {
+                currentSession = createSession(fragment);
+                console.log('创建文件传输会话:', currentSession.id);
+            }
+
+            fileMetadata = fragment.metadata;
+            fileTotalFragments = fragment.total;
+            fileFragments = {};
+
+            // 显示文件下载区域
+            document.getElementById('file-download-section').style.display = 'block';
+            document.getElementById('downloadFileName').textContent = fileMetadata.fileName;
+            document.getElementById('downloadFileSize').textContent = formatBytes(fileMetadata.fileSize);
+            document.getElementById('downloadFileType').textContent = fileMetadata.mimeType;
+
+            console.log('开始接收文件:', fileMetadata.fileName, fileMetadata.fileSize, 'bytes');
         }
-
-        fileMetadata = fragment.metadata;
-        fileTotalFragments = fragment.total;
-        fileFragments = {};
-
-        // 显示文件下载区域
-        document.getElementById('file-download-section').style.display = 'block';
-        document.getElementById('downloadFileName').textContent = fileMetadata.fileName;
-        document.getElementById('downloadFileSize').textContent = formatBytes(fileMetadata.fileSize);
-        document.getElementById('downloadFileType').textContent = fileMetadata.mimeType;
-
-        console.log('开始接收文件:', fileMetadata.fileName, fileMetadata.fileSize, 'bytes');
     }
 
     // 确保 fileTotalFragments 始终更新（不仅限于 fragment 0）
@@ -10983,13 +10996,11 @@ function completeFileTransfer() {
     // T027: 文件传输完成，清除会话（在用户下载后清除，这里暂不清除）
     // 会话将在用户点击下载按钮后的 triggerFileDownload() 中清除
 
-    // 停止扫描
+    // 标记完成，停止扫描
+    fileTransferComplete = true;
     scanning = false;
     stopScan();
     setState('complete');
-
-    // 自动触发下载（可选）
-    // triggerFileDownload();
 }
 
 // Show missing fragments list
@@ -11434,32 +11445,34 @@ function scan() {
                 hasReceivedFirstFragment = true;
                 setState('receiving');
             }
+            // 解析 QR 数据
+            let data;
             try {
                 // Strip UTF-8 BOM that QRCode.js adds for non-ASCII content
                 let rawData = code.data;
                 if (rawData.charCodeAt(0) === 0xFEFF) {
                     rawData = rawData.substring(1);
                 }
-                const data = JSON.parse(rawData);
-
-                // T043: 检测fragment类型并路由
-                if (data.type === 'file') {
-                    // 文件传输模式
-                    handleFileFragment(data);
-                } else if (data.i !== undefined && data.t && data.d) {
-                    // 文本传输模式（兼容旧格式）
-                    handleTextFragment(data);
-                } else {
-                    // 不是我们格式的QR码，显示原始数据
-                    console.log('非分片QR码，原始数据:', code.data);
-                    document.getElementById('output').textContent = code.data;
-                    document.getElementById('copyBtn').style.display = 'block'; // 显示复制按钮
-                }
+                data = JSON.parse(rawData);
             } catch (e) {
                 // JSON解析失败，显示原始数据
                 console.log('JSON解析失败，显示原始数据:', code.data);
                 document.getElementById('output').textContent = code.data;
-                document.getElementById('copyBtn').style.display = 'block'; // 显示复制按钮
+                document.getElementById('copyBtn').style.display = 'block';
+                data = null;
+            }
+
+            // 路由到对应处理器（不在 try-catch 中，避免吞掉处理器异常）
+            if (data) {
+                if (data.type === 'file') {
+                    handleFileFragment(data);
+                } else if (data.i !== undefined && data.t && data.d) {
+                    handleTextFragment(data);
+                } else {
+                    console.log('非分片QR码，原始数据:', code.data);
+                    document.getElementById('output').textContent = code.data;
+                    document.getElementById('copyBtn').style.display = 'block';
+                }
             }
         }
     }
@@ -11579,6 +11592,6 @@ document.addEventListener('DOMContentLoaded', function() {
 <div style="text-align:center; padding:20px 0 12px; font-size:11px; color:var(--text-muted);">
     <span data-zh="最后更新" data-en="Last updated">最后更新</span>: <span id="buildTime"></span>
 </div>
-<script>document.getElementById('buildTime').textContent=new Date('2026-02-03T05:58:00Z').toLocaleString();</script>
+<script>document.getElementById('buildTime').textContent=new Date('2026-02-03T06:20:00Z').toLocaleString();</script>
 </body>
 </html>
