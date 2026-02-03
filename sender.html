@@ -72,6 +72,9 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3
 #singleQRControls span { color: var(--text-secondary); }
 #singleQRInfo { margin-top: 10px; font-size: 16px; color: var(--text-primary); font-weight: 600; }
 .close-single-mode { position: absolute; top: 20px; right: 20px; background: var(--error); color: white; border: none; width: 40px; height: 40px; border-radius: 50%; font-size: 24px; cursor: pointer; display: flex; justify-content: center; align-items: center; }
+#fullscreenLoopControls { margin-top: 15px; display: flex; gap: 15px; align-items: center; background: var(--bg-card); padding: 10px 20px; border-radius: 980px; }
+#fullscreenLoopControls button { padding: 8px 20px; border: none; border-radius: 980px; cursor: pointer; font-weight: 500; font-size: 14px; }
+#fullscreenLoopControls span { color: var(--text-secondary); font-size: 14px; font-weight: 600; }
 /* File upload */
 .drop-zone { border: 2px dashed var(--border-light); border-radius: 16px; padding: 40px 20px; text-align: center; background: var(--bg-input); cursor: pointer; transition: border-color 0.2s, background-color 0.2s; color: var(--text-secondary); }
 .drop-zone:hover { border-color: var(--accent); background: var(--accent-subtle); }
@@ -293,8 +296,14 @@ details summary:hover { color: var(--text-primary); }
     <div id="singleQRContent"></div>
     <div id="singleQRControls">
         <button class="btn" onclick="previousQR()" style="padding: 10px 20px;">⬅️ 上一张</button>
-        <span style="font-size: 14px; color: var(--text-muted);">支持键盘 ← → 切换</span>
+        <input type="number" id="pageNumberInput" min="1" value="1" onchange="jumpToPage()" onkeydown="if(event.key==='Enter'){jumpToPage();event.preventDefault();}" style="width:60px; text-align:center; padding:6px; border:1px solid var(--border); border-radius:8px; background:var(--bg-input); color:var(--text-primary); font-size:14px; font-weight:600;">
+        <span style="font-size:14px; color:var(--text-muted);">/ <span id="pageTotalDisplay">1</span></span>
         <button class="btn" onclick="nextQR()" style="padding: 10px 20px;">下一张 ➡️</button>
+    </div>
+    <div id="fullscreenLoopControls" style="display:none;">
+        <button id="fsPauseBtn" onclick="togglePause()" style="background:var(--warning); color:var(--bg-primary);">⏸ 暂停</button>
+        <span id="fsLoopStatus" style="color:var(--success);">▶ 播放中</span>
+        <span id="fsLoopIndex">1 / 1</span>
     </div>
 </div>
 
@@ -307,6 +316,7 @@ let qrCodes = [];
 let currentIndex = 0;
 let loopInterval = null;
 let loopSpeed = 100;
+let qrCache = {}; // { index: innerHTML } for fullscreen QR cache
 
 // ===== Tab Switcher =====
 function switchInputTab(tab) {
@@ -837,7 +847,7 @@ function calculateSimpleChecksum(data) {
 function generatePrivateQRCodes(fragments) {
     const display = document.getElementById('qrDisplay');
     display.innerHTML = '';
-    qrCodes = []; // Reset QR codes array
+    qrCodes = []; qrCache = {}; // Reset QR codes and cache
 
     fragments.forEach((fragment, index) => {
         const container = document.createElement('div');
@@ -1004,7 +1014,7 @@ function generateQR() {
     // Otherwise, use existing private mode logic
     const display = document.getElementById('qrDisplay');
     display.innerHTML = '';
-    qrCodes = []; // 重置QR码数组
+    qrCodes = []; qrCache = {}; // 重置QR码数组和缓存
     
     // 获取用户选择的选项
     const errorLevel = document.getElementById('errorLevel').value;
@@ -1213,6 +1223,21 @@ function setMode(newMode) {
             loopStatus.textContent = '▶ 播放中';
             loopStatus.style.color = 'var(--success)';
         }
+        // 打开全屏覆盖层显示大 QR
+        const fsContainer = document.getElementById('singleQRContainer');
+        const fsLoopCtrl = document.getElementById('fullscreenLoopControls');
+        const fsSingleCtrl = document.getElementById('singleQRControls');
+        if (fsContainer) {
+            fsContainer.style.display = 'flex';
+            if (fsLoopCtrl) fsLoopCtrl.style.display = 'flex';
+            if (fsSingleCtrl) fsSingleCtrl.style.display = 'none';
+            // 同步全屏暂停按钮状态
+            const fsPauseBtn = document.getElementById('fsPauseBtn');
+            const fsLoopStatus = document.getElementById('fsLoopStatus');
+            if (fsPauseBtn) { fsPauseBtn.textContent = '⏸ 暂停'; fsPauseBtn.style.background = 'var(--warning)'; fsPauseBtn.style.color = 'var(--bg-primary)'; }
+            if (fsLoopStatus) { fsLoopStatus.textContent = '▶ 播放中'; fsLoopStatus.style.color = 'var(--success)'; }
+            document.addEventListener('keydown', handleSingleModeKeys);
+        }
         startLoop();
     } else if (mode === 'single') {
         // Fullscreen Single Mode
@@ -1226,9 +1251,14 @@ function enterSingleMode() {
     const container = document.getElementById('singleQRContainer');
     if (container) {
         container.style.display = 'flex';
+        // Show single controls, hide loop controls
+        const singleCtrl = document.getElementById('singleQRControls');
+        const loopCtrl = document.getElementById('fullscreenLoopControls');
+        if (singleCtrl) singleCtrl.style.display = 'flex';
+        if (loopCtrl) loopCtrl.style.display = 'none';
         // Start from current index or 0
         showQRCode(currentIndex);
-        
+
         // Add keyboard listener
         document.addEventListener('keydown', handleSingleModeKeys);
     }
@@ -1239,30 +1269,40 @@ function exitSingleMode() {
     if (container) {
         container.style.display = 'none';
         document.removeEventListener('keydown', handleSingleModeKeys);
-        
+
+        // Stop loop if in loop mode
+        if (mode === 'loop') {
+            stopLoop();
+        }
+        // Hide fullscreen loop controls
+        const fsLoopCtrl = document.getElementById('fullscreenLoopControls');
+        if (fsLoopCtrl) fsLoopCtrl.style.display = 'none';
+
         // Revert to grid mode visually in the UI buttons
-        setMode('grid'); 
+        setMode('grid');
     }
 }
 
 function handleSingleModeKeys(e) {
+    // Don't handle keys when typing in page number input
+    const pageInput = document.getElementById('pageNumberInput');
+    if (document.activeElement === pageInput) return;
     if (e.key === 'ArrowLeft') previousQR();
     if (e.key === 'ArrowRight') nextQR();
     if (e.key === 'Escape') exitSingleMode();
+    if (e.key === ' ' && mode === 'loop') { e.preventDefault(); togglePause(); }
 }
 
 function startLoop() {
     if (qrCodes.length === 0) return;
     
     stopLoop(); // 清除之前的定时器
-    
+
     // 设置循环起始位置（转换为0基索引）
     currentIndex = Math.max(0, loopStart - 1);
-    // Note: showQRCode handles both single (fullscreen) and loop (inline) updates.
-    // For loop mode, we might need a separate update function if we want to keep using the inline display.
-    // Let's make showQRCode smart.
+    showQRCode(currentIndex);
     updateLoopDisplay();
-    
+
     // 根据用户设置的速度切换，只在指定范围内循环
     loopInterval = setInterval(() => {
         currentIndex++;
@@ -1270,7 +1310,7 @@ function startLoop() {
         if (currentIndex >= loopEnd) {
             currentIndex = loopStart - 1; // 转换为0基索引
         }
-        updateLoopQR(currentIndex); // Use specific function for loop
+        showQRCode(currentIndex);
         updateLoopDisplay();
     }, loopSpeed);
 }
@@ -1299,56 +1339,51 @@ function stopLoop() {
 
 // Unified Show QR Code (Handlers both Fullscreen Single and Inline Loop logic if needed, but primarily Fullscreen now)
 function showQRCode(index) {
-    // 1. Update Fullscreen View
     const contentDiv = document.getElementById('singleQRContent');
     const infoDiv = document.getElementById('singleQRInfo');
-    
+
     if (contentDiv && qrCodes[index]) {
-        contentDiv.innerHTML = ''; // Clear previous
-        
-        // Calculate max available size
-        // Viewport - padding (40px) - controls height (approx 100px)
-        const vw = Math.min(window.innerWidth * 0.9, window.innerHeight * 0.8);
-        const size = Math.floor(vw);
-
-        // Generate new large QR code
-        try {
-            new QRCode(contentDiv, {
-                text: qrCodes[index].data, // Use stored raw data string
-                width: size,
-                height: size,
-                colorDark: '#000000',
-                colorLight: '#ffffff',
-                correctLevel: (function(){ var m={'L':QRCode.CorrectLevel.L,'M':QRCode.CorrectLevel.M,'Q':QRCode.CorrectLevel.Q,'H':QRCode.CorrectLevel.H}; return m[document.getElementById('errorLevel').value] || QRCode.CorrectLevel.H; })()
-            });
-
-            // Update Info Text
-            let infoText = `第 ${index + 1} / ${qrCodes.length} 张`;
-            // Try to parse data to get file info if available
+        // Check QR cache first for performance (critical for 100ms loop)
+        if (qrCache[index]) {
+            contentDiv.innerHTML = qrCache[index];
+        } else {
+            contentDiv.innerHTML = '';
+            const vw = Math.min(window.innerWidth * 0.9, window.innerHeight * 0.8);
+            const size = Math.floor(vw);
             try {
-                const data = JSON.parse(qrCodes[index].data);
-                if (data.type === 'file' && (data.meta || data.metadata)) {
-                    const meta = data.meta || data.metadata;
-                    const name = meta.n || meta.fileName;
-                    infoText += ` - ${name}`;
-                }
-            } catch(e) {}
-            
-            infoDiv.textContent = infoText;
-            
-        } catch (e) {
-            console.error('Generarte large QR failed', e);
+                new QRCode(contentDiv, {
+                    text: qrCodes[index].data,
+                    width: size,
+                    height: size,
+                    colorDark: '#000000',
+                    colorLight: '#ffffff',
+                    correctLevel: (function(){ var m={'L':QRCode.CorrectLevel.L,'M':QRCode.CorrectLevel.M,'Q':QRCode.CorrectLevel.Q,'H':QRCode.CorrectLevel.H}; return m[document.getElementById('errorLevel').value] || QRCode.CorrectLevel.H; })()
+                });
+                // Cache the generated HTML
+                qrCache[index] = contentDiv.innerHTML;
+            } catch (e) {
+                console.error('Generate large QR failed', e);
+            }
         }
+
+        // Update Info Text
+        let infoText = `第 ${index + 1} / ${qrCodes.length} 张`;
+        try {
+            const data = JSON.parse(qrCodes[index].data);
+            if (data.type === 'file' && (data.meta || data.metadata)) {
+                const meta = data.meta || data.metadata;
+                const name = meta.n || meta.fileName;
+                infoText += ` - ${name}`;
+            }
+        } catch(e) {}
+        infoDiv.textContent = infoText;
     }
-    
-    // 2. Also ensure inline elements are handled correctly if we just switched
-    // For single mode, we use the fullscreen overlay, so inline items don't matter much, 
-    // but we can hide them all to be clean.
-    if (mode === 'single') {
-         qrCodes.forEach(item => {
-            if (item && item.element) item.element.style.display = 'block'; // Or none? Grid mode shows all.
-        });
-    }
+
+    // Sync page number input (F2)
+    const pageInput = document.getElementById('pageNumberInput');
+    const pageTotal = document.getElementById('pageTotalDisplay');
+    if (pageInput) pageInput.value = index + 1;
+    if (pageTotal) pageTotal.textContent = qrCodes.length;
 }
 
 function showAllQRCodes() {
@@ -1392,6 +1427,18 @@ function updateQRIndex() {
     }
 }
 
+function jumpToPage() {
+    const input = document.getElementById('pageNumberInput');
+    let page = parseInt(input.value);
+    if (isNaN(page) || page < 1) page = 1;
+    if (page > qrCodes.length) page = qrCodes.length;
+    input.value = page;
+    currentIndex = page - 1;
+    showQRCode(currentIndex);
+    updateQRIndex();
+    document.getElementById('qrSelector').value = currentIndex;
+}
+
 function updateSingleModeSelector() {
     const selector = document.getElementById('qrSelector');
     selector.innerHTML = '';
@@ -1425,22 +1472,24 @@ function togglePause() {
     
     const pauseBtn = document.getElementById('pauseBtn');
     const loopStatus = document.getElementById('loopStatus');
-    
+    const fsPauseBtn = document.getElementById('fsPauseBtn');
+    const fsLoopStatus = document.getElementById('fsLoopStatus');
+
     if (isPaused) {
         // 恢复播放
         isPaused = false;
-        pauseBtn.textContent = '⏸ 暂停';
-        pauseBtn.style.background = 'var(--warning)';
-        loopStatus.textContent = '▶ 播放中';
-        loopStatus.style.color = 'var(--success)';
+        if (pauseBtn) { pauseBtn.textContent = '⏸ 暂停'; pauseBtn.style.background = 'var(--warning)'; }
+        if (loopStatus) { loopStatus.textContent = '▶ 播放中'; loopStatus.style.color = 'var(--success)'; }
+        if (fsPauseBtn) { fsPauseBtn.textContent = '⏸ 暂停'; fsPauseBtn.style.background = 'var(--warning)'; fsPauseBtn.style.color = 'var(--bg-primary)'; }
+        if (fsLoopStatus) { fsLoopStatus.textContent = '▶ 播放中'; fsLoopStatus.style.color = 'var(--success)'; }
         startLoop();
     } else {
         // 暂停播放
         isPaused = true;
-        pauseBtn.textContent = '▶ 播放';
-        pauseBtn.style.background = 'var(--success)';
-        loopStatus.textContent = '⏸ 已暂停';
-        loopStatus.style.color = 'var(--warning)';
+        if (pauseBtn) { pauseBtn.textContent = '▶ 播放'; pauseBtn.style.background = 'var(--success)'; }
+        if (loopStatus) { loopStatus.textContent = '⏸ 已暂停'; loopStatus.style.color = 'var(--warning)'; }
+        if (fsPauseBtn) { fsPauseBtn.textContent = '▶ 播放'; fsPauseBtn.style.background = 'var(--success)'; fsPauseBtn.style.color = 'var(--bg-primary)'; }
+        if (fsLoopStatus) { fsLoopStatus.textContent = '⏸ 已暂停'; fsLoopStatus.style.color = 'var(--warning)'; }
         stopLoop();
     }
 }
@@ -1497,10 +1546,11 @@ function resetLoopRange() {
 
 // 更新循环显示信息
 function updateLoopDisplay() {
+    const indexText = qrCodes.length > 0 ? `${currentIndex + 1} / ${qrCodes.length}` : '0 / 0';
     const loopQrIndex = document.getElementById('loopQrIndex');
-    if (loopQrIndex && qrCodes.length > 0) {
-        loopQrIndex.textContent = `${currentIndex + 1} / ${qrCodes.length}`;
-    }
+    if (loopQrIndex) loopQrIndex.textContent = indexText;
+    const fsLoopIndex = document.getElementById('fsLoopIndex');
+    if (fsLoopIndex) fsLoopIndex.textContent = indexText;
 }
 
 // ===== Bilingual Support =====
