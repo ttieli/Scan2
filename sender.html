@@ -279,20 +279,20 @@ details summary:hover { color: var(--text-primary); }
                 <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">
                     提示：可设置循环范围，如 4-50 表示只循环第4片到第50片
                 </div>
-                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 500;" data-zh="补传码：" data-en="Retransmit Code:">补传码：</label>
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                        <input type="text" id="retransmitCodeInput" placeholder="2q25292h"
-                               style="flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text-primary); font-family: monospace; letter-spacing: 1px;">
-                        <button onclick="applyRetransmitCode()" style="padding: 6px 14px; background: var(--accent); color: #fff; border: none; border-radius: 980px; cursor: pointer; white-space: nowrap;" data-zh="应用" data-en="Apply">应用</button>
-                        <button onclick="clearRetransmitCode()" style="padding: 6px 14px; background: var(--bg-card-hover); color: var(--text-primary); border: 1px solid var(--border); border-radius: 980px; cursor: pointer; white-space: nowrap;" data-zh="清除" data-en="Clear">清除</button>
-                    </div>
-                    <div id="retransmitStatus" style="margin-top: 6px; font-size: 12px; color: var(--text-muted);" data-zh="输入接收端补传码，只循环缺失片段" data-en="Enter receiver retransmit code to loop only missing fragments">输入接收端补传码，只循环缺失片段</div>
-                </div>
             </div>
         </div>
+        <div style="margin-top: 15px; background: var(--bg-input); padding: 12px; border-radius: 12px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: 500;" data-zh="补传码：" data-en="Retransmit Code:">补传码：</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="retransmitCodeInput" placeholder="2q25292h"
+                       style="flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text-primary); font-family: monospace; letter-spacing: 1px;">
+                <button onclick="applyRetransmitCode()" style="padding: 6px 14px; background: var(--accent); color: #fff; border: none; border-radius: 980px; cursor: pointer; white-space: nowrap;" data-zh="应用" data-en="Apply">应用</button>
+                <button onclick="clearRetransmitCode()" style="padding: 6px 14px; background: var(--bg-card-hover); color: var(--text-primary); border: 1px solid var(--border); border-radius: 980px; cursor: pointer; white-space: nowrap;" data-zh="清除" data-en="Clear">清除</button>
+            </div>
+            <div id="retransmitStatus" style="margin-top: 6px; font-size: 12px; color: var(--text-muted);" data-zh="输入接收端补传码，只循环缺失片段" data-en="Enter receiver retransmit code to loop only missing fragments">输入接收端补传码，只循环缺失片段</div>
+        </div>
     </div>
-    
+
     <div class="section" id="qr-output-section" style="display:none;">
         <h2><span data-zh="二维码显示" data-en="QR Code Output"></span></h2>
         <div class="qr-display grid-mode" id="qrDisplay"></div>
