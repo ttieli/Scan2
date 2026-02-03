@@ -314,6 +314,15 @@ body.has-recovery-banner { padding-top: 70px; }
                 <div id="missingFragmentsList" style="display:none; background:var(--bg-input); padding:12px; border-radius:12px; font-size:13px; max-height:200px; overflow-y:auto;"></div>
             </div>
 
+            <div id="retransmitCodeSection" style="display:none; margin:15px 0;">
+                <button class="btn" onclick="generateRetransmitCode()" style="background:var(--accent); width:100%;" data-zh="🔄 生成补传码" data-en="🔄 Retransmit Code">🔄 生成补传码</button>
+                <div id="retransmitCodeDisplay" style="display:none; margin-top:10px; background:var(--bg-input); padding:12px; border-radius:12px; text-align:center;">
+                    <div style="font-size:13px; color:var(--text-secondary); margin-bottom:6px;" data-zh="将此码输入发送端：" data-en="Enter on sender:">将此码输入发送端：</div>
+                    <div id="retransmitCodeValue" style="font-size:22px; font-family:monospace; letter-spacing:2px; color:var(--text-primary); word-break:break-all; user-select:all; cursor:pointer;"></div>
+                    <div id="retransmitCodeInfo" style="font-size:12px; color:var(--text-secondary); margin-top:6px;"></div>
+                </div>
+            </div>
+
             <button class="btn" onclick="stopScan()" style="background:var(--error);" data-zh="⏹️ 停止扫描" data-en="⏹️ Stop">⏹️ 停止扫描</button>
         </div>
     </div>
@@ -10509,6 +10518,32 @@ let scanningStartTime = Date.now();
 let currentUIState = 'ready';
 let hasReceivedFirstFragment = false;
 
+// ===== Retransmit Code Encoding (Base31) =====
+var RT_CHARSET = '23456789abcdefghjkmnpqrstuvwxyz'; // 31 chars, excludes 0,1,i,l,o
+
+function rtGetWidth(total) {
+    var w = 2;
+    while (Math.pow(31, w) <= total) w++;
+    return w;
+}
+
+function rtToBaseN(n, w) {
+    var s = '';
+    for (var i = w - 1; i >= 0; i--) {
+        s += RT_CHARSET[Math.floor(n / Math.pow(31, i)) % 31];
+    }
+    return s;
+}
+
+function encodeRetransmit(total, missingIndices1Based) {
+    var w = rtGetWidth(total);
+    var s = rtToBaseN(total, w);
+    for (var i = 0; i < missingIndices1Based.length; i++) {
+        s += rtToBaseN(missingIndices1Based[i], w);
+    }
+    return s;
+}
+
 // ===== State Management =====
 function setState(state) {
     currentUIState = state;
@@ -10581,6 +10616,10 @@ function resetToReady() {
     if (mfs) { mfs.style.display = 'none'; }
     var mfl = document.getElementById('missingFragmentsList');
     if (mfl) { mfl.style.display = 'none'; mfl.innerHTML = ''; }
+    var rcs = document.getElementById('retransmitCodeSection');
+    if (rcs) { rcs.style.display = 'none'; }
+    var rcd = document.getElementById('retransmitCodeDisplay');
+    if (rcd) { rcd.style.display = 'none'; }
     updateProgressBar(0, 1);
 
     setState('ready');
@@ -10793,9 +10832,11 @@ function handleTextFragment(data) {
     // FIX: Update visual progress map for text
     updateProgressMap(totalChunks, chunks, data.i);
 
-    // Show missing fragments button
+    // Show missing fragments button and retransmit code button
     var mfs = document.getElementById('missingFragmentsSection');
     if (mfs) mfs.style.display = 'block';
+    var rcs = document.getElementById('retransmitCodeSection');
+    if (rcs) rcs.style.display = 'block';
 
     // Update last-scanned info
     const lsi = document.getElementById('lastScannedInfo');
@@ -10925,9 +10966,11 @@ function handleFileFragment(fragment) {
     // FIX: Update visual progress map for files
     updateProgressMap(fragment.total, fileFragments, fragment.index);
 
-    // Show missing fragments button
+    // Show missing fragments button and retransmit code button
     var mfs = document.getElementById('missingFragmentsSection');
     if (mfs) mfs.style.display = 'block';
+    var rcs = document.getElementById('retransmitCodeSection');
+    if (rcs) rcs.style.display = 'block';
 
     // Update last-scanned info
     const lsi = document.getElementById('lastScannedInfo');
@@ -11027,6 +11070,49 @@ function showMissingFragments() {
         listDiv.innerHTML = '<strong style="color:var(--warning);">缺失 ' + missing.length + ' 片:</strong><br>' + missing.join(', ');
     }
     listDiv.style.display = 'block';
+}
+
+// Generate retransmit code for missing fragments
+function generateRetransmitCode() {
+    var total = 0;
+    var missing = [];
+
+    if (fileTotalFragments > 0) {
+        total = fileTotalFragments;
+        for (var i = 0; i < fileTotalFragments; i++) {
+            if (!(i in fileFragments)) missing.push(i + 1); // 1-based
+        }
+    } else if (totalChunks > 0) {
+        total = totalChunks;
+        for (var i = 1; i <= totalChunks; i++) {
+            if (!(i in chunks)) missing.push(i); // already 1-based
+        }
+    }
+
+    var display = document.getElementById('retransmitCodeDisplay');
+    var codeEl = document.getElementById('retransmitCodeValue');
+    var infoEl = document.getElementById('retransmitCodeInfo');
+
+    if (total === 0 || missing.length === 0) {
+        if (display) {
+            display.style.display = 'block';
+            codeEl.textContent = '-';
+            var lang = (document.documentElement.lang || 'zh').startsWith('zh') ? 'zh' : 'en';
+            infoEl.textContent = lang === 'zh' ? '所有片段已接收，无需补传' : 'All fragments received';
+        }
+        return;
+    }
+
+    var code = encodeRetransmit(total, missing);
+    if (display) {
+        display.style.display = 'block';
+        codeEl.textContent = code;
+        var lang = (document.documentElement.lang || 'zh').startsWith('zh') ? 'zh' : 'en';
+        var w = rtGetWidth(total);
+        infoEl.textContent = lang === 'zh'
+            ? '共' + total + '片，缺' + missing.length + '片（W=' + w + '，码长' + code.length + '）'
+            : total + ' total, ' + missing.length + ' missing (W=' + w + ', len=' + code.length + ')';
+    }
 }
 
 // Update Visual Progress Map (10-column grid with row/column labels)
@@ -11592,6 +11678,6 @@ document.addEventListener('DOMContentLoaded', function() {
 <div style="text-align:center; padding:20px 0 12px; font-size:11px; color:var(--text-muted);">
     <span data-zh="最后更新" data-en="Last updated">最后更新</span>: <span id="buildTime"></span>
 </div>
-<script>document.getElementById('buildTime').textContent=new Date('2026-02-03T06:20:00Z').toLocaleString();</script>
+<script>document.getElementById('buildTime').textContent=new Date('2026-02-03T08:30:00Z').toLocaleString();</script>
 </body>
 </html>
