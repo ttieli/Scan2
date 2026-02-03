@@ -10895,6 +10895,9 @@ function handleFileFragment(fragment) {
         console.log('开始接收文件:', fileMetadata.fileName, fileMetadata.fileSize, 'bytes');
     }
 
+    // 确保 fileTotalFragments 始终更新（不仅限于 fragment 0）
+    if (fragment.total > 0) fileTotalFragments = fragment.total;
+
     // 存储片段数据
     const isDuplicateFragment = fragment.index in fileFragments;
     fileFragments[fragment.index] = fragment.data;

@@ -1343,9 +1343,9 @@ function showQRCode(index) {
     const infoDiv = document.getElementById('singleQRInfo');
 
     if (contentDiv && qrCodes[index]) {
-        // Check QR cache first for performance (critical for 100ms loop)
+        // Check QR cache for a pre-rendered data URL image
         if (qrCache[index]) {
-            contentDiv.innerHTML = qrCache[index];
+            contentDiv.innerHTML = '<img src="' + qrCache[index] + '" style="max-width:100%;max-height:100%;">';
         } else {
             contentDiv.innerHTML = '';
             const vw = Math.min(window.innerWidth * 0.9, window.innerHeight * 0.8);
@@ -1359,8 +1359,11 @@ function showQRCode(index) {
                     colorLight: '#ffffff',
                     correctLevel: (function(){ var m={'L':QRCode.CorrectLevel.L,'M':QRCode.CorrectLevel.M,'Q':QRCode.CorrectLevel.Q,'H':QRCode.CorrectLevel.H}; return m[document.getElementById('errorLevel').value] || QRCode.CorrectLevel.H; })()
                 });
-                // Cache the generated HTML
-                qrCache[index] = contentDiv.innerHTML;
+                // Cache the canvas data URL (canvas is available synchronously after draw)
+                var canvas = contentDiv.querySelector('canvas');
+                if (canvas) {
+                    try { qrCache[index] = canvas.toDataURL('image/png'); } catch(e) {}
+                }
             } catch (e) {
                 console.error('Generate large QR failed', e);
             }
