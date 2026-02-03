@@ -678,17 +678,28 @@ function handleFileUpload(file) {
 }
 
 // Estimate QR Count (T035)
-function estimateQRCount(file) {
-    const base64Size = file.size * 1.37; // Base64 编码会增加约37%
-    const firstFragmentSize = 350; // 第一片包含元数据，需要很小以容纳中文文件名(QR编码开销)
-    const fragmentSize = 500; // 其他片的正常容量（与 chunkFile 实际值一致）
+// Get chunk sizes based on error correction level
+// Higher correction → smaller chunks → more QR codes but similar density
+function getChunkSizes(errorLevel) {
+    const sizes = {
+        'L': { first: 350, rest: 500 },
+        'M': { first: 300, rest: 400 },
+        'Q': { first: 200, rest: 300 },
+        'H': { first: 150, rest: 200 }
+    };
+    return sizes[errorLevel] || sizes['H'];
+}
 
-    // 第一片用800字节，其余用2800字节
-    let remainingSize = base64Size - firstFragmentSize;
+function estimateQRCount(file) {
+    const errorLevel = document.getElementById('errorLevel').value;
+    const cs = getChunkSizes(errorLevel);
+    const base64Size = file.size * 1.37; // Base64 编码会增加约37%
+
+    let remainingSize = base64Size - cs.first;
     let qrCount = 1; // 第一片
 
     if (remainingSize > 0) {
-        qrCount += Math.ceil(remainingSize / fragmentSize);
+        qrCount += Math.ceil(remainingSize / cs.rest);
     }
 
     const scanTime = Math.ceil(qrCount * 2 / 60); // 假设每个QR码扫描需要2秒
@@ -766,11 +777,11 @@ function chunkFile(file, pureBase64, checksum) {
     // base64 is already stripped in generateFileQR
     const base64 = pureBase64;
 
-    // FIX: Reduced chunk sizes to avoid "code length overflow" and improve scanability.
-    // The library limit is ~932 bytes.
-    // We use a much lower value (500) to ensure the QR code is not too dense and can be scanned easily by mobile phones.
-    const fragmentSize = 500; // Reduced to 500 for better scanability (was 850, originally 2800)
-    const firstFragmentSize = 350; // Reduced to 350 for first chunk with metadata
+    // Chunk sizes based on error correction level
+    const errorLevel = document.getElementById('errorLevel').value;
+    const cs = getChunkSizes(errorLevel);
+    const fragmentSize = cs.rest;
+    const firstFragmentSize = cs.first;
     const fragments = [];
 
     let position = 0;
