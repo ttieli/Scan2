@@ -2,52 +2,70 @@
 
 **English** | [中文](#中文)
 
-A purely offline data transfer solution using QR codes. No network required.
+Transfer **any file** between devices using only QR codes — no Wi-Fi, no Bluetooth, no cable, no internet. Just point your camera and scan.
 
-## Architecture
+Works completely offline. Open a webpage, pick a file, and the data flows through a stream of QR codes at up to **1.6 KB/s**. The receiver scans them with a phone camera and reconstructs the original file, byte for byte.
 
-Three static HTML files, zero external dependencies (all libraries embedded).
+## Why?
 
-- **`index.html`** — Landing page linking to Sender and Receiver.
-- **`sender.html`** — Encodes text or files into a sequence of QR codes.
-  - Files: binary → Base64 → chunked JSON fragments.
-  - Fragment 0: metadata only (filename, size, checksum). Fragment 1+: data chunks.
-  - Display modes: Grid, Loop (auto-cycle), Single (fullscreen).
-  - Retransmit code input: enter a code from the receiver to loop only missing fragments.
-- **`receiver.html`** — Scans QR codes via camera and reassembles data.
-  - Parses custom JSON protocol, reassembles chunks in memory.
-  - Visual progress grid map showing received/missing/just-scanned fragments.
-  - Retransmit code generation: produces a compact Base31 code encoding missing fragment indices.
-  - Auto-saves progress to `localStorage` for session recovery.
+Sometimes the simplest channel is the most reliable. Air-gapped machines, locked-down networks, foreign hotel Wi-Fi you don't trust — QR Transfer gets your data across when nothing else can. No app install, no account, no pairing. It's just three HTML files.
+
+## How Fast?
+
+Each QR code carries a chunk of your data. At 10 codes/second (0.1s cycle):
+
+| Error Correction | Data per QR | Throughput |
+|-----------------|-------------|------------|
+| H (highest) | ~52 bytes | ~0.5 KB/s |
+| M (medium) | ~120 bytes | ~1.2 KB/s |
+| L (lowest) | ~165 bytes | ~1.6 KB/s |
+
+A 50 KB document transfers in under 30 seconds on M level. Not blazing fast, but when you have **zero network**, it's everything.
 
 ## Quick Start
 
-### Online
-Visit: **[https://ttieli.github.io/Scan2/](https://ttieli.github.io/Scan2/)**
+### Online Demo
+**[https://ttieli.github.io/Scan2/](https://ttieli.github.io/Scan2/)**
 
 ### Offline
-1. Download `index.html`, `sender.html`, and `receiver.html`.
-2. Open `index.html` in any modern browser.
-3. **Sender**: choose a file or enter text, generate QR codes.
-4. **Receiver**: open on a mobile device, grant camera permission, scan.
+1. Download `index.html`, `sender.html`, `receiver.html` — that's the whole app.
+2. Open `sender.html` on the sending device. Pick a file or paste text.
+3. Open `receiver.html` on the receiving device. Point the camera at the QR codes.
+4. Done. The file is reconstructed and ready to download.
 
 ## Features
 
-- **100% Offline** — works in air-gapped environments.
-- **Any File Type** — images, PDFs, zips, binaries, etc.
-- **Auto Chunking** — large files split into scannable QR code sequences.
-- **Retransmit Code** — receiver generates a short code for missing fragments; sender loops only those.
-- **Session Recovery** — progress saved automatically; resume after page reload.
-- **Visual Progress** — realtime grid map of received/missing chunks.
-- **Bilingual UI** — Chinese/English, auto-detected with manual toggle.
+- **100% Offline** — no server, no network, no cloud. Data never leaves your devices.
+- **Any File Type** — PDFs, images, code, zips, binaries, markdown, anything.
+- **Smart Chunking** — files are automatically split into scannable QR code sequences.
+- **Retransmit Code** — missed a few QR codes? The receiver generates a short code; enter it on the sender to replay only the missing ones.
+- **Session Recovery** — progress is saved automatically. Close the page, reopen, keep scanning.
+- **Visual Progress Map** — see exactly which fragments have been received and which are missing.
+- **Bilingual** — Chinese and English, auto-detected.
 
-## File Structure
+## How It Works
+
+```
+Sender                              Receiver
+┌──────────────┐                    ┌──────────────┐
+│  Pick a file │                    │ Point camera │
+│      ↓       │                    │      ↓       │
+│  Base64 encode│    QR codes       │  Scan & parse│
+│      ↓       │  ──────────────►   │      ↓       │
+│  Split into  │  (one by one)      │  Reassemble  │
+│  fragments   │                    │  fragments   │
+│      ↓       │                    │      ↓       │
+│  QR sequence │                    │  Download ✓  │
+└──────────────┘                    └──────────────┘
+```
+
+## Files
 
 ```
 ├── index.html        # Landing page
-├── sender.html       # QR code generation
-├── receiver.html     # Camera scanning & reassembly
-├── test.html         # Automated E2E tests
+├── sender.html       # QR code generation (with embedded QRCode.js)
+├── receiver.html     # Camera scanning & reassembly (with embedded jsQR)
+├── test.html         # Automated E2E test suite
 └── README.md
 ```
 
@@ -59,51 +77,68 @@ Visit: **[https://ttieli.github.io/Scan2/](https://ttieli.github.io/Scan2/)**
 
 [English](#qr-transfer-scan2) | **中文**
 
-纯离线二维码数据传输工具，无需网络。
+用二维码传输**任意文件** — 不需要 Wi-Fi，不需要蓝牙，不需要数据线，不需要互联网。对准摄像头扫一扫就行。
 
-## 架构
+完全离线运行。打开网页，选个文件，数据就通过一连串二维码流出去，速率可达 **1.6 KB/s**。接收端用手机摄像头扫描，逐字节还原出原始文件。
 
-三个静态 HTML 文件，零外部依赖（所有库内嵌）。
+## 为什么需要它？
 
-- **`index.html`** — 首页，链接到发送端和接收端。
-- **`sender.html`** — 将文本或文件编码为二维码序列。
-  - 文件：二进制 → Base64 → 分片 JSON。
-  - 片段 0：仅元数据（文件名、大小、校验和）。片段 1+：数据分片。
-  - 显示模式：平铺、循环播放（自动轮换）、单张（全屏）。
-  - 补传码输入：输入接收端生成的编码，仅循环缺失片段。
-- **`receiver.html`** — 通过摄像头扫描二维码并还原数据。
-  - 解析自定义 JSON 协议，内存中重组分片。
-  - 可视化进度地图，显示已收/缺失/刚扫描的片段。
-  - 补传码生成：生成紧凑的 Base31 编码，包含缺失片段索引。
-  - 自动保存进度到 `localStorage`，支持断点续传。
+有时候最简单的通道最可靠。断网的机房、管控严格的内网、你不信任的酒店 Wi-Fi — QR Transfer 在其他方式都不通的时候，帮你把数据送过去。不用装 App，不用注册账号，不用配对。整个应用就三个 HTML 文件。
+
+## 传输速率
+
+每张二维码承载一片数据。以每秒 10 张（0.1 秒/张）计算：
+
+| 纠错等级 | 每张数据量 | 吞吐量 |
+|---------|----------|--------|
+| H（最高纠错） | ~52 字节 | ~0.5 KB/s |
+| M（中等纠错） | ~120 字节 | ~1.2 KB/s |
+| L（最低纠错） | ~165 字节 | ~1.6 KB/s |
+
+一个 50 KB 的文档在 M 级别下不到 30 秒传完。速度不算飞快，但在**没有任何网络**的情况下，这就是一切。
 
 ## 快速开始
 
-### 在线使用
-访问：**[https://ttieli.github.io/Scan2/](https://ttieli.github.io/Scan2/)**
+### 在线体验
+**[https://ttieli.github.io/Scan2/](https://ttieli.github.io/Scan2/)**
 
 ### 离线使用
-1. 下载 `index.html`、`sender.html` 和 `receiver.html`。
-2. 用浏览器打开 `index.html`。
-3. **发送端**：选择文件或输入文本，生成二维码。
-4. **接收端**：在手机上打开，授权摄像头，扫描。
+1. 下载 `index.html`、`sender.html`、`receiver.html` — 这就是整个应用。
+2. 在发送设备上打开 `sender.html`，选文件或粘贴文本。
+3. 在接收设备上打开 `receiver.html`，摄像头对准二维码。
+4. 搞定。文件已还原，可以下载。
 
-## 功能特性
+## 功能亮点
 
-- **完全离线** — 适用于断网环境。
-- **支持任意文件** — 图片、PDF、压缩包、二进制等。
-- **自动分片** — 大文件自动拆分为可扫描的二维码序列。
-- **补传码** — 接收端生成缺失片段编码，发送端仅循环播放缺失部分。
-- **断点续传** — 进度自动保存，刷新页面可恢复。
-- **可视化进度** — 实时进度地图显示接收状态。
-- **中英双语** — 自动检测语言，可手动切换。
+- **完全离线** — 没有服务器，没有网络，没有云端。数据不会离开你的设备。
+- **支持任意文件** — PDF、图片、代码、压缩包、二进制、Markdown，随便什么都行。
+- **智能分片** — 文件自动拆分为手机摄像头能可靠扫描的二维码序列。
+- **补传码** — 漏扫了几张？接收端生成一个短编码，输入发送端就只重播缺失的那几张。
+- **断点续传** — 进度自动保存。关掉页面再打开，继续扫。
+- **可视化进度** — 实时看到哪些片段已收到、哪些还缺。
+- **中英双语** — 自动检测语言，也可手动切换。
+
+## 工作原理
+
+```
+发送端                               接收端
+┌──────────────┐                    ┌──────────────┐
+│  选择文件     │                    │ 对准摄像头    │
+│      ↓       │                    │      ↓       │
+│  Base64 编码  │     二维码流        │  扫描解析     │
+│      ↓       │  ──────────────►   │      ↓       │
+│  拆分为片段   │   (逐张展示)        │  重组片段     │
+│      ↓       │                    │      ↓       │
+│  二维码序列   │                    │  下载文件 ✓   │
+└──────────────┘                    └──────────────┘
+```
 
 ## 文件结构
 
 ```
 ├── index.html        # 首页
-├── sender.html       # 二维码生成
-├── receiver.html     # 摄像头扫描与数据还原
+├── sender.html       # 二维码生成（内嵌 QRCode.js）
+├── receiver.html     # 摄像头扫描与数据还原（内嵌 jsQR）
 ├── test.html         # 自动化端到端测试
 └── README.md
 ```
