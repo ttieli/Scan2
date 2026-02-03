@@ -1,8 +1,0 @@
-# Local files
-_local/
-
-# macOS
-.DS_Store
-
-# Claude Code
-.claude/
