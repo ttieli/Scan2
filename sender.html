@@ -198,10 +198,10 @@ details summary:hover { color: var(--text-primary); }
                 <div class="option-group" id="optgroup-error">
                     <label data-zh="纠错级别" data-en="Error Correction">纠错级别</label>
                     <select id="errorLevel">
-                        <option value="L" selected>L - 低 (7%纠错，数据最多)</option>
+                        <option value="L">L - 低 (7%纠错，数据最多)</option>
                         <option value="M">M - 中 (15%纠错)</option>
                         <option value="Q">Q - 较高 (25%纠错)</option>
-                        <option value="H">H - 高 (30%纠错，数据最少)</option>
+                        <option value="H" selected>H - 高 (30%纠错，数据最少)</option>
                     </select>
                 </div>
                 <div class="option-group" id="optgroup-chunk">
@@ -218,11 +218,11 @@ details summary:hover { color: var(--text-primary); }
                     <label data-zh="循环速度" data-en="Loop Speed">循环速度</label>
                     <select id="loopSpeed" onchange="updateLoopSpeed()">
                         <option value="50">超闪电 (0.05秒)</option>
-                        <option value="100">闪电 (0.1秒)</option>
+                        <option value="100" selected>闪电 (0.1秒)</option>
                         <option value="300">极快 (0.3秒)</option>
                         <option value="500">很快 (0.5秒)</option>
                         <option value="1000">快速 (1秒)</option>
-                        <option value="2000" selected>正常 (2秒)</option>
+                        <option value="2000">正常 (2秒)</option>
                         <option value="3000">慢速 (3秒)</option>
                         <option value="5000">超慢 (5秒)</option>
                     </select>
@@ -306,7 +306,7 @@ let mode = 'grid';
 let qrCodes = [];
 let currentIndex = 0;
 let loopInterval = null;
-let loopSpeed = 2000;
+let loopSpeed = 100;
 
 // ===== Tab Switcher =====
 function switchInputTab(tab) {
@@ -853,7 +853,9 @@ function generatePrivateQRCodes(fragments) {
         const qrData = JSON.stringify(fragment);
 
         // Generate QR code
-        const correctLevel = QRCode.CorrectLevel.L; // Use L level for maximum capacity
+        const userLevel = document.getElementById('errorLevel').value;
+        const levelMap = {'L':QRCode.CorrectLevel.L,'M':QRCode.CorrectLevel.M,'Q':QRCode.CorrectLevel.Q,'H':QRCode.CorrectLevel.H};
+        const correctLevel = levelMap[userLevel] || QRCode.CorrectLevel.H;
         try {
             new QRCode(qrDiv, {
                 text: qrData,
@@ -1306,9 +1308,9 @@ function showQRCode(index) {
                 height: size,
                 colorDark: '#000000',
                 colorLight: '#ffffff',
-                correctLevel: QRCode.CorrectLevel.L
+                correctLevel: (function(){ var m={'L':QRCode.CorrectLevel.L,'M':QRCode.CorrectLevel.M,'Q':QRCode.CorrectLevel.Q,'H':QRCode.CorrectLevel.H}; return m[document.getElementById('errorLevel').value] || QRCode.CorrectLevel.H; })()
             });
-            
+
             // Update Info Text
             let infoText = `第 ${index + 1} / ${qrCodes.length} 张`;
             // Try to parse data to get file info if available

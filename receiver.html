@@ -144,20 +144,49 @@ body.has-recovery-banner { padding-top: 70px; }
 
 /* Progress Map */
 .progress-map {
-    display: flex; flex-wrap: wrap; gap: 2px; margin-top: 15px;
-    padding: 10px; background: var(--bg-input); border-radius: 12px;
-    max-height: 200px; overflow-y: auto;
+    margin-top: 8px; padding: 10px;
+    background: var(--bg-input); border-radius: 12px;
+    max-height: 280px; overflow-y: auto; overflow-x: hidden;
 }
 .progress-map-title {
     font-size: 14px; font-weight: 600; margin-bottom: 5px;
     color: var(--text-secondary); display: flex;
     justify-content: space-between; align-items: center;
 }
+.progress-grid {
+    display: grid;
+    grid-template-columns: 28px repeat(10, 1fr);
+    gap: 2px; width: 100%;
+}
+.grid-header {
+    font-size: 10px; color: var(--text-muted);
+    text-align: center; padding: 2px 0;
+    font-weight: 600; user-select: none;
+}
+.grid-rowlabel {
+    font-size: 10px; color: var(--text-muted);
+    text-align: right; padding-right: 4px;
+    display: flex; align-items: center;
+    justify-content: flex-end;
+    font-weight: 600; user-select: none;
+}
 .map-item {
-    width: 12px; height: 12px; background: var(--border-light);
+    aspect-ratio: 1; background: var(--border-light);
     border-radius: 2px; transition: background-color 0.2s;
 }
 .map-item.received { background: var(--success); }
+@keyframes scanFlash {
+    0% { background: var(--warning); transform: scale(1.6); }
+    100% { transform: scale(1); }
+}
+.map-item.just-scanned {
+    animation: scanFlash 0.5s ease-out;
+    z-index: 1; position: relative;
+}
+.map-item.last-scanned-marker {
+    outline: 2px solid var(--warning);
+    outline-offset: 1px;
+}
 .map-legend {
     display: flex; gap: 15px; font-size: 11px;
     color: var(--text-muted); margin-top: 5px;
@@ -271,10 +300,12 @@ body.has-recovery-banner { padding-top: 70px; }
                     <span data-zh="片段接收详情" data-en="Fragment Details">片段接收详情</span>
                     <span id="mapStats" style="font-weight:normal; font-size:12px;"></span>
                 </div>
+                <div id="lastScannedInfo" style="font-size:12px; color:var(--warning); min-height:16px;"></div>
                 <div id="progressMap" class="progress-map"></div>
                 <div class="map-legend">
                     <div class="legend-item"><div class="legend-box" style="background:var(--success);"></div><span data-zh="已接收" data-en="Received">已接收</span></div>
                     <div class="legend-item"><div class="legend-box" style="background:var(--border-light);"></div><span data-zh="待接收" data-en="Pending">待接收</span></div>
+                    <div class="legend-item"><div class="legend-box" style="background:var(--warning);"></div><span data-zh="刚扫描" data-en="Just Scanned">刚扫描</span></div>
                 </div>
             </div>
 
@@ -10740,6 +10771,7 @@ function handleTextFragment(data) {
             console.error('Base64解码失败:', e);
         }
     }
+    const isDuplicateChunk = data.i in chunks;
     chunks[data.i] = decodedChunk;
     totalChunks = data.t;
 
@@ -10749,7 +10781,13 @@ function handleTextFragment(data) {
     saveSession(currentSession);
 
     // FIX: Update visual progress map for text
-    updateProgressMap(totalChunks, chunks);
+    updateProgressMap(totalChunks, chunks, data.i);
+
+    // Update last-scanned info
+    const lsi = document.getElementById('lastScannedInfo');
+    if (lsi) lsi.textContent = isDuplicateChunk
+        ? `最后扫描: #${data.i + 1} (重复)`
+        : `最后扫描: #${data.i + 1} ✓ 新`;
 
     updateOutput();
     updateScanProgress('🔍 扫描中...', Object.keys(chunks).length, totalChunks);
@@ -10845,6 +10883,7 @@ function handleFileFragment(fragment) {
     }
 
     // 存储片段数据
+    const isDuplicateFragment = fragment.index in fileFragments;
     fileFragments[fragment.index] = fragment.data;
 
     // T026: 更新会话并保存到 LocalStorage
@@ -10855,8 +10894,13 @@ function handleFileFragment(fragment) {
     }
 
     // FIX: Update visual progress map for files
-    // Note: fileFragments uses integer keys 0,1,2..., which matches our map logic
-    updateProgressMap(fragment.total, fileFragments);
+    updateProgressMap(fragment.total, fileFragments, fragment.index);
+
+    // Update last-scanned info
+    const lsi = document.getElementById('lastScannedInfo');
+    if (lsi) lsi.textContent = isDuplicateFragment
+        ? `最后扫描: #${fragment.index + 1} (重复)`
+        : `最后扫描: #${fragment.index + 1} ✓ 新`;
 
     // 更新进度
     const receivedCount = Object.keys(fileFragments).length;
@@ -10928,29 +10972,62 @@ function completeFileTransfer() {
     // triggerFileDownload();
 }
 
-// Update Visual Progress Map
-function updateProgressMap(total, receivedIndicesObj) {
+// Update Visual Progress Map (10-column grid with row/column labels)
+function updateProgressMap(total, receivedIndicesObj, justScannedIndex) {
     const container = document.getElementById('progressMapContainer');
     const map = document.getElementById('progressMap');
     const stats = document.getElementById('mapStats');
-    
+
     // Show container if hidden
     if (container.style.display === 'none') {
         container.style.display = 'block';
     }
 
-    // Initialize grid if empty or size changed
-    if (map.childElementCount !== total) {
+    const numRows = Math.ceil(total / 10);
+
+    // Rebuild grid if total changed
+    if (!map.querySelector('.progress-grid') || map.dataset.total !== String(total)) {
         map.innerHTML = '';
-        const fragment = document.createDocumentFragment();
-        for (let i = 0; i < total; i++) {
-            const div = document.createElement('div');
-            div.className = 'map-item';
-            div.id = `map-item-${i}`;
-            div.title = `第 ${i + 1} 片`;
-            fragment.appendChild(div);
+        map.dataset.total = String(total);
+
+        const grid = document.createElement('div');
+        grid.className = 'progress-grid';
+
+        // Header row: empty corner + column labels 0-9
+        const corner = document.createElement('div');
+        corner.className = 'grid-header';
+        grid.appendChild(corner);
+        for (let c = 0; c < 10; c++) {
+            const h = document.createElement('div');
+            h.className = 'grid-header';
+            h.textContent = String(c);
+            grid.appendChild(h);
         }
-        map.appendChild(fragment);
+
+        // Data rows
+        for (let r = 0; r < numRows; r++) {
+            // Row label (tens+hundreds digit)
+            const label = document.createElement('div');
+            label.className = 'grid-rowlabel';
+            label.textContent = String(r);
+            grid.appendChild(label);
+
+            // 10 cells per row
+            for (let c = 0; c < 10; c++) {
+                const idx = r * 10 + c;
+                const cell = document.createElement('div');
+                cell.className = 'map-item';
+                if (idx < total) {
+                    cell.id = `map-item-${idx}`;
+                    cell.title = `#${idx + 1} [${r},${c}]`;
+                } else {
+                    cell.style.visibility = 'hidden';
+                }
+                grid.appendChild(cell);
+            }
+        }
+
+        map.appendChild(grid);
     }
 
     // Mark received items
@@ -10960,6 +11037,23 @@ function updateProgressMap(total, receivedIndicesObj) {
             item.classList.add('received');
         }
     });
+
+    // Flash animation for just-scanned cell
+    if (justScannedIndex !== undefined) {
+        const prevMarker = map.querySelector('.last-scanned-marker');
+        if (prevMarker) prevMarker.classList.remove('last-scanned-marker');
+        const prevFlash = map.querySelector('.just-scanned');
+        if (prevFlash) prevFlash.classList.remove('just-scanned');
+
+        const el = document.getElementById(`map-item-${justScannedIndex}`);
+        if (el) {
+            el.classList.remove('just-scanned');
+            void el.offsetWidth; // force reflow to restart animation
+            el.classList.add('just-scanned');
+            el.classList.add('last-scanned-marker');
+            el.scrollIntoView({ block: 'nearest' });
+        }
+    }
 
     // Update stats text
     const receivedCount = Object.keys(receivedIndicesObj).length;
