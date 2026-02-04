@@ -1303,7 +1303,7 @@ function startLoop() {
     stopLoop(); // 清除之前的定时器
 
     if (retransmitIndices && retransmitIndices.length > 0) {
-        // 补传模式：只循环指定索引
+        // 指定片段模式：只循环指定索引
         var rtPos = 0;
         currentIndex = retransmitIndices[0];
         showQRCode(currentIndex);
