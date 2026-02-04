@@ -38,7 +38,7 @@ A 50 KB document transfers in under 30 seconds on M level. Not blazing fast, but
 - **100% Offline** — no server, no network, no cloud. Data never leaves your devices.
 - **Any File Type** — PDFs, images, code, zips, binaries, markdown, anything.
 - **Smart Chunking** — files are automatically split into scannable QR code sequences.
-- **Retransmit Code** — missed a few QR codes? The receiver generates a short code; enter it on the sender to replay only the missing ones.
+- **Smart Retransmit** — missed a few QR codes? The receiver shows exactly which numbers are missing with a one-tap copy button. Paste them into the sender to replay only those fragments.
 - **Session Recovery** — progress is saved automatically. Close the page, reopen, keep scanning.
 - **Visual Progress Map** — see exactly which fragments have been received and which are missing.
 - **Bilingual** — Chinese and English, auto-detected.
@@ -113,7 +113,7 @@ Sender                              Receiver
 - **完全离线** — 没有服务器，没有网络，没有云端。数据不会离开你的设备。
 - **支持任意文件** — PDF、图片、代码、压缩包、二进制、Markdown，随便什么都行。
 - **智能分片** — 文件自动拆分为手机摄像头能可靠扫描的二维码序列。
-- **补传码** — 漏扫了几张？接收端生成一个短编码，输入发送端就只重播缺失的那几张。
+- **智能补传** — 漏扫了几张？接收端直接显示缺失编号，一键复制，粘贴到发送端就只循环那几张。
 - **断点续传** — 进度自动保存。关掉页面再打开，继续扫。
 - **可视化进度** — 实时看到哪些片段已收到、哪些还缺。
 - **中英双语** — 自动检测语言，也可手动切换。
