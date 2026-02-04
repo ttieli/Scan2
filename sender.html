@@ -282,14 +282,14 @@ details summary:hover { color: var(--text-primary); }
             </div>
         </div>
         <div style="margin-top: 15px; background: var(--bg-input); padding: 12px; border-radius: 12px;">
-            <label style="display: block; margin-bottom: 8px; font-weight: 500;" data-zh="补传码：" data-en="Retransmit Code:">补传码：</label>
+            <label style="display: block; margin-bottom: 8px; font-weight: 500;" data-zh="指定片段：" data-en="Fragments:">指定片段：</label>
             <div style="display: flex; gap: 8px; align-items: center;">
-                <input type="text" id="retransmitCodeInput" placeholder="2q25292h"
-                       style="flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text-primary); font-family: monospace; letter-spacing: 1px;">
-                <button onclick="applyRetransmitCode()" style="padding: 6px 14px; background: var(--accent); color: #fff; border: none; border-radius: 980px; cursor: pointer; white-space: nowrap;" data-zh="应用" data-en="Apply">应用</button>
-                <button onclick="clearRetransmitCode()" style="padding: 6px 14px; background: var(--bg-card-hover); color: var(--text-primary); border: 1px solid var(--border); border-radius: 980px; cursor: pointer; white-space: nowrap;" data-zh="清除" data-en="Clear">清除</button>
+                <input type="text" id="fragmentNumbersInput" data-placeholder-zh="如: 1, 34, 37, 121, 246" data-placeholder-en="e.g. 1, 34, 37, 121, 246" placeholder="如: 1, 34, 37, 121, 246"
+                       style="flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text-primary); font-family: monospace;">
+                <button onclick="applyFragmentNumbers()" style="padding: 6px 14px; background: var(--accent); color: #fff; border: none; border-radius: 980px; cursor: pointer; white-space: nowrap;" data-zh="应用" data-en="Apply">应用</button>
+                <button onclick="clearFragmentNumbers()" style="padding: 6px 14px; background: var(--bg-card-hover); color: var(--text-primary); border: 1px solid var(--border); border-radius: 980px; cursor: pointer; white-space: nowrap;" data-zh="清除" data-en="Clear">清除</button>
             </div>
-            <div id="retransmitStatus" style="margin-top: 6px; font-size: 12px; color: var(--text-muted);" data-zh="输入接收端补传码，只循环缺失片段" data-en="Enter receiver retransmit code to loop only missing fragments">输入接收端补传码，只循环缺失片段</div>
+            <div id="fragmentNumbersStatus" style="margin-top: 6px; font-size: 12px; color: var(--text-muted);" data-zh="输入要循环的片段编号，逗号分隔。留空=全部循环" data-en="Enter fragment numbers, comma-separated. Empty=loop all">输入要循环的片段编号，逗号分隔。留空=全部循环</div>
         </div>
     </div>
 
@@ -1490,47 +1490,6 @@ let loopStart = 1;
 let loopEnd = 1;
 let retransmitIndices = null; // 0-based indices for retransmit mode, null = normal mode
 
-// ===== Retransmit Code Decoding (Base31) =====
-var RT_CHARSET = '23456789abcdefghjkmnpqrstuvwxyz'; // 31 chars, excludes 0,1,i,l,o
-
-function rtGetWidth(total) {
-    var w = 2;
-    while (Math.pow(31, w) <= total) w++;
-    return w;
-}
-
-function rtFromBaseN(code, offset, w) {
-    var n = 0;
-    for (var i = 0; i < w; i++) {
-        if (offset + i >= code.length) return -1;
-        var idx = RT_CHARSET.indexOf(code[offset + i]);
-        if (idx < 0) return -1;
-        n = n * 31 + idx;
-    }
-    return n;
-}
-
-function decodeRetransmit(code, expectedTotal) {
-    code = code.toLowerCase().replace(/\s/g, '');
-    if (code.length < 4) return null;
-
-    // Use known total to determine width (eliminates ambiguity)
-    var w = rtGetWidth(expectedTotal);
-    if (code.length % w !== 0 || code.length < w * 2) return null;
-
-    var total = rtFromBaseN(code, 0, w);
-    if (total !== expectedTotal) return null;
-
-    var missing = [];
-    for (var i = w; i < code.length; i += w) {
-        var idx = rtFromBaseN(code, i, w);
-        if (idx < 1 || idx > total) return null;
-        missing.push(idx);
-    }
-    if (missing.length === 0) return null;
-    return { total: total, missing: missing };
-}
-
 // 暂停/恢复循环播放
 function togglePause() {
     if (!loopInterval && mode !== 'loop') return;
@@ -1600,13 +1559,13 @@ function resetLoopRange() {
     loopStart = 1;
     loopEnd = qrCodes.length;
     retransmitIndices = null;
-    var rtInput = document.getElementById('retransmitCodeInput');
-    if (rtInput) rtInput.value = '';
-    var rtStatus = document.getElementById('retransmitStatus');
-    if (rtStatus) {
+    var fnInput = document.getElementById('fragmentNumbersInput');
+    if (fnInput) fnInput.value = '';
+    var fnStatus = document.getElementById('fragmentNumbersStatus');
+    if (fnStatus) {
         var lang = (document.documentElement.lang || 'zh').startsWith('zh') ? 'zh' : 'en';
-        rtStatus.textContent = lang === 'zh' ? '输入接收端补传码，只循环缺失片段' : 'Enter receiver retransmit code to loop only missing fragments';
-        rtStatus.style.color = 'var(--text-muted)';
+        fnStatus.textContent = lang === 'zh' ? '输入要循环的片段编号，逗号分隔。留空=全部循环' : 'Enter fragment numbers, comma-separated. Empty=loop all';
+        fnStatus.style.color = 'var(--text-muted)';
     }
 
     // 如果当前正在循环播放，重启循环
@@ -1618,60 +1577,82 @@ function resetLoopRange() {
     console.log(`循环范围已重置: 第1片 到 第${qrCodes.length}片`);
 }
 
-// 应用补传码
-function applyRetransmitCode() {
-    var input = document.getElementById('retransmitCodeInput');
-    var statusEl = document.getElementById('retransmitStatus');
-    var code = input ? input.value.trim() : '';
+// 应用指定片段编号
+function applyFragmentNumbers() {
+    var input = document.getElementById('fragmentNumbersInput');
+    var statusEl = document.getElementById('fragmentNumbersStatus');
+    var raw = input ? input.value.trim() : '';
     var lang = (document.documentElement.lang || 'zh').startsWith('zh') ? 'zh' : 'en';
 
-    if (!code) {
+    if (!raw) {
         if (statusEl) {
-            statusEl.textContent = lang === 'zh' ? '请输入补传码' : 'Please enter a retransmit code';
+            statusEl.textContent = lang === 'zh' ? '请输入片段编号' : 'Please enter fragment numbers';
             statusEl.style.color = 'var(--error)';
         }
         return;
     }
 
-    var result = decodeRetransmit(code, qrCodes.length);
-    if (!result) {
+    // 解析逗号/空格/顿号分隔的数字
+    var parts = raw.split(/[,，、\s]+/).filter(function(s) { return s.length > 0; });
+    var indices = [];
+    var invalid = [];
+
+    for (var i = 0; i < parts.length; i++) {
+        var n = parseInt(parts[i], 10);
+        if (isNaN(n) || n < 1 || n > qrCodes.length) {
+            invalid.push(parts[i]);
+        } else if (indices.indexOf(n - 1) === -1) {
+            indices.push(n - 1); // 转为 0-based
+        }
+    }
+
+    if (invalid.length > 0) {
         if (statusEl) {
-            statusEl.textContent = lang === 'zh' ? '无效补传码，请检查输入（总片数须匹配）' : 'Invalid code (total must match)';
+            statusEl.textContent = lang === 'zh'
+                ? '无效编号: ' + invalid.join(', ') + '（有效范围 1-' + qrCodes.length + '）'
+                : 'Invalid: ' + invalid.join(', ') + ' (range 1-' + qrCodes.length + ')';
             statusEl.style.color = 'var(--error)';
         }
         return;
     }
 
-    // Convert 1-based missing indices to 0-based
-    retransmitIndices = result.missing.map(function(idx) { return idx - 1; });
+    if (indices.length === 0) {
+        if (statusEl) {
+            statusEl.textContent = lang === 'zh' ? '未解析到有效编号' : 'No valid numbers found';
+            statusEl.style.color = 'var(--error)';
+        }
+        return;
+    }
+
+    // 排序后设置
+    indices.sort(function(a, b) { return a - b; });
+    retransmitIndices = indices;
 
     if (statusEl) {
         statusEl.textContent = lang === 'zh'
-            ? '补传模式：循环 ' + retransmitIndices.length + ' 片缺失片段'
-            : 'Retransmit: looping ' + retransmitIndices.length + ' missing fragments';
+            ? '指定模式：循环 ' + indices.length + ' 片（第' + indices.map(function(i){return i+1;}).join(', ') + '片）'
+            : 'Selected: looping ' + indices.length + ' fragments';
         statusEl.style.color = 'var(--success)';
     }
 
-    // Restart loop in retransmit mode
+    // 重启循环
     if (mode === 'loop') {
         stopLoop();
         startLoop();
     }
 }
 
-// 清除补传码
-function clearRetransmitCode() {
+function clearFragmentNumbers() {
     retransmitIndices = null;
-    var input = document.getElementById('retransmitCodeInput');
+    var input = document.getElementById('fragmentNumbersInput');
     if (input) input.value = '';
-    var statusEl = document.getElementById('retransmitStatus');
+    var statusEl = document.getElementById('fragmentNumbersStatus');
     var lang = (document.documentElement.lang || 'zh').startsWith('zh') ? 'zh' : 'en';
     if (statusEl) {
-        statusEl.textContent = lang === 'zh' ? '已清除补传码，恢复正常循环' : 'Retransmit cleared, normal loop restored';
+        statusEl.textContent = lang === 'zh' ? '已清除，恢复全部循环' : 'Cleared, full loop restored';
         statusEl.style.color = 'var(--text-muted)';
     }
 
-    // Restart normal loop
     if (mode === 'loop' && !isPaused) {
         stopLoop();
         startLoop();
@@ -1683,7 +1664,7 @@ function updateLoopDisplay() {
     var indexText;
     if (retransmitIndices && retransmitIndices.length > 0) {
         var rtPos = retransmitIndices.indexOf(currentIndex);
-        indexText = `补传 ${rtPos + 1}/${retransmitIndices.length} (第${currentIndex + 1}片)`;
+        indexText = `指定 ${rtPos + 1}/${retransmitIndices.length} (第${currentIndex + 1}片)`;
     } else {
         indexText = qrCodes.length > 0 ? `${currentIndex + 1} / ${qrCodes.length}` : '0 / 0';
     }
