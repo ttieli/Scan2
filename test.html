@@ -10448,6 +10448,9 @@ const tests = [
     { id: 'T6b', name: '纠错 M + 中文文件名', type: 'file' },
     { id: 'T6c', name: '纠错 Q + 中文文件名', type: 'file' },
     { id: 'T6d', name: '纠错 H + 中文文件名', type: 'file' },
+    { id: 'T7', name: '补传编号解析', type: 'retransmit' },
+    { id: 'T8', name: '部分片段传输E2E（文本）', type: 'retransmit' },
+    { id: 'T9', name: '部分片段传输E2E（文件）', type: 'retransmit' },
 ];
 
 // Render test list
@@ -10610,6 +10613,229 @@ function testFilePipeline(id, fileName, fileType, fileBytes, errorLevel) {
 }
 
 // ============================================================
+// Retransmit tests
+// ============================================================
+
+function parseFragmentNumbers(raw, total) {
+    var parts = raw.split(/[,，、\s]+/).filter(function(s) { return s.length > 0; });
+    var indices = [];
+    var invalid = [];
+    for (var i = 0; i < parts.length; i++) {
+        var n = parseInt(parts[i], 10);
+        if (isNaN(n) || n < 1 || n > total) {
+            invalid.push(parts[i]);
+        } else if (indices.indexOf(n - 1) === -1) {
+            indices.push(n - 1);
+        }
+    }
+    indices.sort(function(a, b) { return a - b; });
+    return { indices: indices, invalid: invalid };
+}
+
+function testParseFragmentNumbers(id) {
+    setTestRunning(id);
+    const start = performance.now();
+    let errors = [];
+
+    // Test 1: basic comma-separated
+    let r1 = parseFragmentNumbers('1, 3, 5, 7', 10);
+    if (r1.indices.length !== 4) errors.push('T1: expected 4, got ' + r1.indices.length);
+    if (r1.indices[0] !== 0 || r1.indices[3] !== 6) errors.push('T1: wrong values ' + JSON.stringify(r1.indices));
+    if (r1.invalid.length !== 0) errors.push('T1: unexpected invalid');
+
+    // Test 2: Chinese separators (顿号, 中文逗号, space)
+    let r2 = parseFragmentNumbers('1、3 5，7', 10);
+    if (r2.indices.length !== 4) errors.push('T2: expected 4, got ' + r2.indices.length);
+
+    // Test 3: out of range and non-numeric
+    let r3 = parseFragmentNumbers('0, 5, 11, abc', 10);
+    if (r3.indices.length !== 1) errors.push('T3: expected 1 valid, got ' + r3.indices.length);
+    if (r3.invalid.length !== 3) errors.push('T3: expected 3 invalid, got ' + r3.invalid.length);
+
+    // Test 4: dedup
+    let r4 = parseFragmentNumbers('3, 3, 3', 10);
+    if (r4.indices.length !== 1) errors.push('T4: expected 1 after dedup, got ' + r4.indices.length);
+
+    // Test 5: empty
+    let r5 = parseFragmentNumbers('', 10);
+    if (r5.indices.length !== 0) errors.push('T5: expected 0, got ' + r5.indices.length);
+
+    const elapsed = (performance.now() - start).toFixed(0);
+
+    if (errors.length === 0) {
+        log(`[${id}] ✅ 通过 (5个子测试, ${elapsed}ms)`, 'ok');
+        setTestResult(id, true, `5子测试 · ${elapsed}ms`);
+        return true;
+    } else {
+        log(`[${id}] ❌ ${errors.join('; ')}`, 'err');
+        setTestResult(id, false, errors[0]);
+        return false;
+    }
+}
+
+function testPartialTextRetransmit(id) {
+    setTestRunning(id);
+    const start = performance.now();
+    const errorLevel = 'H';
+
+    // 1. Create text that produces 10+ chunks
+    const text = '这是一段用于测试补传功能的中文文本。ABCDEFGHIJKLMNOPQRSTUVWXYZ。'.repeat(10);
+    const chunkSize = 15;
+    const chunks = chunkText(text, chunkSize, errorLevel);
+    log(`[${id}] 文本长度=${text.length}, 分片=${chunks.length}`);
+
+    if (chunks.length < 5) {
+        log(`[${id}] ❌ 分片太少: ${chunks.length}`, 'err');
+        setTestResult(id, false, '分片太少');
+        return false;
+    }
+
+    // 2. QR encode ALL chunks
+    const fragmentJsons = chunks.map((chunk, index) => {
+        const encoded = btoa(unescape(encodeURIComponent(chunk)));
+        return JSON.stringify({ i: index + 1, t: chunks.length, d: encoded, e: 'b64' });
+    });
+
+    const allDecoded = [];
+    for (let i = 0; i < fragmentJsons.length; i++) {
+        const r = encodeAndDecode(fragmentJsons[i], errorLevel);
+        if (!r.success) {
+            log(`[${id}] ❌ QR编解码失败 片${i + 1}: ${r.error}`, 'err');
+            setTestResult(id, false, `QR失败@${i + 1}`);
+            return false;
+        }
+        allDecoded.push(r.data);
+    }
+
+    // 3. Simulate receiver: only receive odd-numbered chunks (1,3,5,...)
+    const received = {};
+    for (let i = 0; i < allDecoded.length; i++) {
+        if ((i + 1) % 2 === 1) { // odd: 1,3,5,...
+            received[i + 1] = allDecoded[i];
+        }
+    }
+
+    // 4. Compute missing
+    const missing = [];
+    for (let i = 1; i <= chunks.length; i++) {
+        if (!(i in received)) missing.push(i);
+    }
+    log(`[${id}] 已收=${Object.keys(received).length}, 缺失=${missing.length}: [${missing.slice(0, 5).join(',')}...]`);
+
+    // 5. Parse missing numbers (as sender would)
+    const parsed = parseFragmentNumbers(missing.join(', '), chunks.length);
+    if (parsed.indices.length !== missing.length) {
+        log(`[${id}] ❌ 编号解析失败`, 'err');
+        setTestResult(id, false, '编号解析失败');
+        return false;
+    }
+
+    // 6. Retransmit missing chunks
+    for (const idx0 of parsed.indices) {
+        received[idx0 + 1] = allDecoded[idx0];
+    }
+
+    // 7. Reassemble
+    const orderedDecoded = [];
+    for (let i = 1; i <= chunks.length; i++) {
+        orderedDecoded.push(received[i]);
+    }
+    const result = reassembleText(orderedDecoded);
+    const elapsed = (performance.now() - start).toFixed(0);
+
+    if (result === text) {
+        log(`[${id}] ✅ 通过 (${chunks.length}片, 补传${missing.length}片, ${elapsed}ms)`, 'ok');
+        setTestResult(id, true, `${chunks.length}片·补${missing.length}片·${elapsed}ms`);
+        return true;
+    } else {
+        log(`[${id}] ❌ 重组不匹配`, 'err');
+        setTestResult(id, false, '重组不匹配');
+        return false;
+    }
+}
+
+function testPartialFileRetransmit(id) {
+    setTestRunning(id);
+    const start = performance.now();
+    const errorLevel = 'H';
+
+    // 1. Create file data
+    const fileBytes = randomBytes(512);
+    const fileName = '补传测试.bin';
+    const fileType = 'application/octet-stream';
+    const base64 = uint8ToBase64(fileBytes);
+    const checksum = calculateSimpleChecksum(base64);
+    const mockFile = { name: fileName, type: fileType, size: fileBytes.length };
+
+    const fragments = chunkFile(mockFile, base64, checksum, errorLevel);
+    log(`[${id}] 文件${fileBytes.length}B, ${fragments.length}片`);
+
+    if (fragments.length < 3) {
+        log(`[${id}] ❌ 分片太少: ${fragments.length}`, 'err');
+        setTestResult(id, false, '分片太少');
+        return false;
+    }
+
+    // 2. QR encode/decode ALL
+    const allDecoded = [];
+    for (let i = 0; i < fragments.length; i++) {
+        const jsonStr = JSON.stringify(fragments[i]);
+        const r = encodeAndDecode(jsonStr, errorLevel);
+        if (!r.success) {
+            log(`[${id}] ❌ QR编解码失败 片${i}: ${r.error}`, 'err');
+            setTestResult(id, false, `QR失败@${i}`);
+            return false;
+        }
+        allDecoded.push(r.data);
+    }
+
+    // 3. Simulate: only receive fragment 0 (metadata)
+    const received = {};
+    received[0] = allDecoded[0];
+
+    // 4. Missing: all data fragments (1 to total-1)
+    const missing = [];
+    for (let i = 0; i < fragments.length; i++) {
+        if (!(i in received)) missing.push(i + 1); // 1-based for display
+    }
+    log(`[${id}] 已收=1(元数据), 缺失=${missing.length}片`);
+
+    // 5. Parse & retransmit
+    const parsed = parseFragmentNumbers(missing.join(', '), fragments.length);
+    for (const idx0 of parsed.indices) {
+        received[idx0] = allDecoded[idx0];
+    }
+
+    // 6. Reassemble
+    const orderedDecoded = [];
+    for (let i = 0; i < fragments.length; i++) {
+        orderedDecoded.push(received[i]);
+    }
+    const result = reassembleFile(orderedDecoded);
+    const elapsed = (performance.now() - start).toFixed(0);
+
+    if (!result.metadata) {
+        log(`[${id}] ❌ 元数据缺失`, 'err');
+        setTestResult(id, false, '元数据缺失');
+        return false;
+    }
+    if (result.metadata.fileName !== fileName) {
+        log(`[${id}] ❌ 文件名不匹配`, 'err');
+        setTestResult(id, false, '文件名不匹配');
+        return false;
+    }
+    if (!arraysEqual(result.bytes, fileBytes)) {
+        log(`[${id}] ❌ 文件内容不匹配`, 'err');
+        setTestResult(id, false, '文件内容不匹配');
+        return false;
+    }
+
+    log(`[${id}] ✅ 通过 (${fragments.length}片, 补传${missing.length}片, ${elapsed}ms)`, 'ok');
+    setTestResult(id, true, `${fragments.length}片·补${missing.length}片·${elapsed}ms`);
+    return true;
+}
+
+// ============================================================
 // Main test runner
 // ============================================================
 
@@ -10665,6 +10891,15 @@ async function runAllTests() {
                         break;
                     case 'T6d':
                         ok = testFilePipeline('T6d', cnFileName, 'image/png', fileData1KB, 'H');
+                        break;
+                    case 'T7':
+                        ok = testParseFragmentNumbers('T7');
+                        break;
+                    case 'T8':
+                        ok = testPartialTextRetransmit('T8');
+                        break;
+                    case 'T9':
+                        ok = testPartialFileRetransmit('T9');
                         break;
                 }
                 if (ok) passed++;
