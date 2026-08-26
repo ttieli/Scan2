@@ -306,6 +306,11 @@ details summary:hover { color: var(--text-primary); }
     <div class="section" id="qr-output-section" style="display:none;">
         <h2><span data-zh="二维码显示" data-en="QR Code Output"></span></h2>
         <div class="qr-display grid-mode" id="qrDisplay"></div>
+        <div id="gridPagination" style="display:none; margin-top:12px; align-items:center; justify-content:center; gap:10px;">
+            <button onclick="setGridPage(gridPage-1)" style="padding:7px 14px; border-radius:980px; border:1px solid var(--border); background:var(--bg-card-hover); color:var(--text-primary);">上一页</button>
+            <span id="gridPageInfo" style="color:var(--text-secondary); font-size:13px;"></span>
+            <button onclick="setGridPage(gridPage+1)" style="padding:7px 14px; border-radius:980px; border:1px solid var(--border); background:var(--bg-card-hover); color:var(--text-primary);">下一页</button>
+        </div>
     </div>
 </div>
 
@@ -337,10 +342,12 @@ var QRCode;!function(){function a(a){this.mode=c.MODE_8BIT_BYTE,this.data=a,this
 // 应用代码
 let mode = 'grid';
 let qrCodes = [];
+let currentQRSource = null;
+let gridPage = 0;
 let currentIndex = 0;
 let loopInterval = null;
 let loopSpeed = 100;
-let qrCache = {}; // { index: innerHTML } for fullscreen QR cache
+let qrCache = new Map(); // bounded LRU: index -> data URL
 let textProtocolMode = 'universal';
 const DISPLAY_QR_SIZE_KEY = 'qr_display_size';
 const DISPLAY_QR_SIZE_DEFAULT = 220;
@@ -548,6 +555,46 @@ function validateTextLength(text, errorLevel) {
 // ===== QR Transfer V2 core (self-contained) =====
 const PUBLIC_QR_CAPACITY = { L: 2953, M: 2331, Q: 1663, H: 1273 };
 const PRIVATE_QR_V10_CAPACITY = { L: 271, M: 213, Q: 151, H: 119 };
+const NORMAL_FILE_MAX_BYTES = 5 * 1024 * 1024;
+const ABSOLUTE_FILE_MAX_BYTES = 20 * 1024 * 1024;
+const GRID_PAGE_SIZE = 12;
+const QR_CACHE_LIMIT = 8;
+
+function getFilePolicy(size, selectedLevel) {
+    if (!Number.isFinite(size) || size < 0 || size > ABSOLUTE_FILE_MAX_BYTES) {
+        return { accepted: false, reason: 'file-too-large', effectiveLevel: selectedLevel };
+    }
+    const longMode = size > NORMAL_FILE_MAX_BYTES;
+    return { accepted: true, longMode: longMode, effectiveLevel: longMode ? 'L' : selectedLevel, requiresConfirmation: longMode };
+}
+
+function calculateV2Layout(kind, transferId, base64Length, metadata, errorLevel) {
+    const capacity = PRIVATE_QR_V10_CAPACITY[errorLevel] || PRIVATE_QR_V10_CAPACITY.H;
+    for (let chunkSize = Math.max(8, capacity - 48); chunkSize >= 8; chunkSize--) {
+        const dataCount = Math.max(1, Math.ceil(base64Length / chunkSize));
+        const total = dataCount + 1;
+        const sample = { v: 2, k: kind, x: transferId, i: total - 1, t: total, d: 'A'.repeat(chunkSize) };
+        if (utf8ByteLength(JSON.stringify(sample)) <= capacity) return { chunkSize: chunkSize, total: total };
+    }
+    throw new Error('V2 分片无法装入目标二维码容量');
+}
+
+function createLazyV2FileSource(base64Data, transferId, metadata, errorLevel) {
+    const layout = calculateV2Layout('f', transferId, base64Data.length, metadata, errorLevel);
+    let payloadCalls = 0;
+    return {
+        kind: 'f', id: transferId, length: layout.total, metadata: metadata,
+        materializedCount: 0,
+        get payloadCalls() { return payloadCalls; },
+        getData: function(index) {
+            if (!Number.isInteger(index) || index < 0 || index >= layout.total) throw new RangeError('fragment-index');
+            payloadCalls++;
+            if (index === 0) return JSON.stringify({ v:2, k:'f', x:transferId, i:0, t:layout.total, d:'', m:metadata });
+            const start = (index - 1) * layout.chunkSize;
+            return JSON.stringify({ v:2, k:'f', x:transferId, i:index, t:layout.total, d:base64Data.slice(start, start + layout.chunkSize) });
+        }
+    };
+}
 
 function utf8Bytes(value) {
     return new TextEncoder().encode(value);
@@ -572,6 +619,20 @@ function bytesToBase64(bytes) {
         binary += String.fromCharCode.apply(null, normalized.subarray(offset, offset + 0x8000));
     }
     return btoa(binary);
+}
+
+let fileProcessingCancelled = false;
+function cancelFileProcessing() { fileProcessingCancelled = true; }
+async function bytesToBase64Async(bytes, onProgress) {
+    const normalized=new Uint8Array(bytes); const batchSize=196608; let result='';
+    for(let offset=0;offset<normalized.length;offset+=batchSize){
+        if(fileProcessingCancelled)throw new Error('已取消文件处理');
+        const chunk=normalized.subarray(offset,Math.min(normalized.length,offset+batchSize));let binary='';
+        for(let inner=0;inner<chunk.length;inner+=0x8000)binary+=String.fromCharCode.apply(null,chunk.subarray(inner,inner+0x8000));
+        result+=btoa(binary);if(onProgress)onProgress(Math.min(1,(offset+chunk.length)/normalized.length));
+        await new Promise(function(resolve){setTimeout(resolve,0);});
+    }
+    return result;
 }
 
 function splitUtf8Text(text, byteBudget) {
@@ -665,6 +726,18 @@ async function buildFileTransfer(bytes, fileName, mimeType, errorLevel) {
     };
     const fragments = buildV2Fragments('f', id, bytesToBase64(normalized), metadata, errorLevel);
     return { id: id, hash: contentHash, fragments: fragments };
+}
+
+async function buildLazyFileTransfer(bytes, fileName, mimeType, errorLevel, onProgress) {
+    const normalized = new Uint8Array(bytes);
+    const policy = getFilePolicy(normalized.length, errorLevel);
+    if (!policy.accepted) throw new Error('文件超过20MiB上限');
+    const contentHash = await sha256Hex(normalized);
+    const descriptor = `${fileName}\u0000${normalized.length}\u0000${contentHash}`;
+    const id = (await sha256Hex(utf8Bytes(descriptor))).slice(0, 16);
+    const metadata = { n:fileName, y:mimeType || 'application/octet-stream', s:normalized.length, h:contentHash };
+    const source = createLazyV2FileSource(await bytesToBase64Async(normalized,onProgress), id, metadata, policy.effectiveLevel);
+    return { id:id, hash:contentHash, source:source, policy:policy };
 }
 
 // Warning/Error Display Utilities (T006)
@@ -835,6 +908,14 @@ function handleFileInputChange(event) {
 
 // Handle File Upload (T034)
 function handleFileUpload(file) {
+    const policy = getFilePolicy(file.size, document.getElementById('errorLevel').value);
+    if (!policy.accepted) {
+        currentFile = null;
+        showError('文件超过20MiB上限，请先压缩或拆分后再传输。');
+        const input = document.getElementById('fileInput');
+        if (input) input.value = '';
+        return;
+    }
     currentFile = file;
 
     // Auto-switch to file tab
@@ -894,16 +975,13 @@ function getChunkSizes(errorLevel) {
     return sizes[errorLevel] || sizes['H'];
 }
 
-function estimateQRCount(file) {
-    const errorLevel = document.getElementById('errorLevel').value;
-    const cs = getChunkSizes(errorLevel);
-    const base64Size = file.size * 1.37; // Base64 编码会增加约37%
-
-    // Fragment 0 = metadata only (no data), rest = data chunks
-    let qrCount = 1; // Fragment 0: metadata
-    qrCount += Math.ceil(base64Size / cs.rest); // Data fragments
-
-    const scanTime = Math.ceil(qrCount * 2 / 60); // 假设每个QR码扫描需要2秒
+function estimateQRCount(file, forcedLevel) {
+    const errorLevel = forcedLevel || document.getElementById('errorLevel').value;
+    const base64Size = Math.ceil(file.size / 3) * 4;
+    const layout = calculateV2Layout('f','0123456789abcdef',base64Size,{n:file.name,y:file.type||'application/octet-stream',s:file.size,h:'0'.repeat(64)},errorLevel);
+    const qrCount = layout.total;
+    const selectedSpeed = Number(document.getElementById('loopSpeed').value) || 100;
+    const scanTime = Math.max(1, Math.ceil(qrCount * selectedSpeed / 60000));
 
     return {
         qrCount: qrCount,
@@ -927,11 +1005,20 @@ async function generateFileQR() {
         return;
     }
 
+    const selectedLevel = document.getElementById('errorLevel').value;
+    const policy = getFilePolicy(currentFile.size, selectedLevel);
+    if (!policy.accepted) { showError('文件超过20MiB上限，请先压缩或拆分。'); return; }
+    if (policy.longMode) {
+        const estimate = estimateQRCount(currentFile, 'L');
+        if (!confirm(`文件超过5MiB，将使用L级超长模式，约${estimate.qrCount}片，理论播放约${estimate.scanTime}分钟。继续吗？`)) return;
+        document.getElementById('errorLevel').value = 'L';
+    }
     clearMessages();
     console.log(`开始生成文件QR码: ${currentFile.name}`);
 
     const display = document.getElementById('qrDisplay');
-    display.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">正在读取文件...</p>';
+    fileProcessingCancelled = false;
+    display.innerHTML = '<div style="text-align:center;color:var(--text-secondary);"><p id="fileProcessStatus">正在读取文件...</p><progress id="fileProcessProgress" max="100" value="0" style="width:min(360px,90%);margin:12px 0;"></progress><br><button type="button" onclick="cancelFileProcessing()" style="padding:7px 16px;border-radius:980px;border:1px solid var(--border);background:var(--bg-card-hover);color:var(--text-primary);">取消</button></div>';
 
     // Use FileReader to read file as Base64
     const reader = new FileReader();
@@ -940,10 +1027,11 @@ async function generateFileQR() {
         try {
             const bytes = new Uint8Array(e.target.result);
             console.log(`文件读取完成: ${bytes.length} 字节`);
-            const errorLevel = document.getElementById('errorLevel').value;
-            const transfer = await buildFileTransfer(bytes, currentFile.name, currentFile.type, errorLevel);
-            console.log(`V2 文件已分片: ${transfer.fragments.length} 片, ID=${transfer.id}`);
-            generatePrivateQRCodes(transfer.fragments);
+            const status=document.getElementById('fileProcessStatus'),progress=document.getElementById('fileProcessProgress');
+            if(status)status.textContent='正在计算校验并编码...';
+            const transfer = await buildLazyFileTransfer(bytes, currentFile.name, currentFile.type, policy.effectiveLevel,function(ratio){if(progress)progress.value=Math.round(ratio*100);if(status)status.textContent=`正在编码 ${Math.round(ratio*100)}%`;});
+            console.log(`V2 惰性文件源: ${transfer.source.length} 片, ID=${transfer.id}`);
+            generatePrivateQRCodes(transfer.source);
 
         } catch (error) {
             showError('文件处理失败: ' + error.message);
@@ -1017,75 +1105,55 @@ function calculateSimpleChecksum(data) {
 
 // Helper function to generate private QR codes from fragments (T040 - reuse existing)
 function generatePrivateQRCodes(fragments) {
-    const display = document.getElementById('qrDisplay');
-    display.innerHTML = '';
-    qrCodes = []; qrCache = {}; retransmitIndices = null; // Reset QR codes, cache, and retransmit
-
-    fragments.forEach((fragment, index) => {
-        const container = document.createElement('div');
-        container.className = 'qr-item';
-
-        const qrDiv = document.createElement('div');
-        container.appendChild(qrDiv);
-
-        const label = document.createElement('div');
-        const typeLabel = fragment.k === 'f' ? '文件' : '文本';
-        label.textContent = `${typeLabel} - 第 ${index + 1} / ${fragments.length} 片`;
-        const meta = fragment.m;
-        if (fragment.k === 'f' && meta) {
-            const fileName = meta.n;
-            label.textContent += `\n📄 ${fileName}`;
-        }
-        label.style.whiteSpace = 'pre-line';
-        container.appendChild(label);
-
-        display.appendChild(container);
-
-        // Convert fragment to JSON string
-        const qrData = JSON.stringify(fragment);
-
-        // Generate QR code
-        const userLevel = document.getElementById('errorLevel').value;
-        const levelMap = {'L':QRCode.CorrectLevel.L,'M':QRCode.CorrectLevel.M,'Q':QRCode.CorrectLevel.Q,'H':QRCode.CorrectLevel.H};
-        const correctLevel = levelMap[userLevel] || QRCode.CorrectLevel.H;
-        try {
-            new QRCode(qrDiv, {
-                text: qrData,
-                width: 200,
-                height: 200,
-                colorDark: '#000000',
-                colorLight: '#ffffff',
-                correctLevel: correctLevel
-            });
-        } catch (error) {
-            console.error(`生成第${index + 1}片QR码失败:`, error);
-            console.error(`失败片段JSON长度: ${qrData.length} 字节`);
-            if (index === 0) {
-                console.error(`第1片包含元数据:`, fragment.m);
-            }
-            // 显示错误信息
-            qrDiv.innerHTML = `<div style="color:var(--error); padding:10px; border:1px solid var(--error); border-radius:12px;">
-                ❌ 第${index + 1}片生成失败<br>
-                数据长度: ${qrData.length}字节<br>
-                请尝试压缩文件
-            </div>`;
-        }
-
-        // 无论成功失败都要push，保持索引一致
-        qrCodes.push({ element: container, data: qrData });
-    });
-
-    console.log(`成功生成${qrCodes.length}个QR码`);
+    if (Array.isArray(fragments)) {
+        const payloads = fragments.map(function(fragment) { return JSON.stringify(fragment); });
+        currentQRSource = { length:payloads.length, materializedCount:payloads.length, getData:function(index){ return payloads[index]; } };
+    } else {
+        currentQRSource = fragments;
+    }
+    qrCodes = { length: currentQRSource.length, forEach: function() {} };
+    qrCache = new Map();
+    retransmitIndices = null;
+    gridPage = 0;
+    renderGridPage(0);
+    console.log(`二维码源已就绪: ${getQRCount()}片，物化=${currentQRSource.materializedCount || 0}`);
 
     // Switch to grid mode after generation
     setMode('grid');
     
     // FIX: Automatically reset loop range to full range (1 to Total) whenever new QR codes are generated
     resetLoopRange();
-    console.log(`循环范围已重置: 第1片 到 第${qrCodes.length}片`);
+    console.log(`循环范围已重置: 第1片 到 第${getQRCount()}片`);
 
     showDisplaySections();
 }
+
+function getQRCount() { return currentQRSource ? currentQRSource.length : qrCodes.length; }
+function getQRData(index) { return currentQRSource ? currentQRSource.getData(index) : (qrCodes[index] && qrCodes[index].data); }
+
+function renderGridPage(requestedPage) {
+    const display = document.getElementById('qrDisplay');
+    const count = getQRCount();
+    const totalPages = Math.max(1, Math.ceil(count / GRID_PAGE_SIZE));
+    gridPage = Math.max(0, Math.min(totalPages - 1, requestedPage));
+    display.innerHTML = '';
+    const start = gridPage * GRID_PAGE_SIZE;
+    const end = Math.min(count, start + GRID_PAGE_SIZE);
+    const levelMap = {L:QRCode.CorrectLevel.L,M:QRCode.CorrectLevel.M,Q:QRCode.CorrectLevel.Q,H:QRCode.CorrectLevel.H};
+    const correctLevel = levelMap[document.getElementById('errorLevel').value] || QRCode.CorrectLevel.H;
+    for (let index = start; index < end; index++) {
+        const container = document.createElement('div'); container.className = 'qr-item';
+        const qrDiv = document.createElement('div'); container.appendChild(qrDiv);
+        const label = document.createElement('div'); label.textContent = `第 ${index + 1} / ${count} 片`; container.appendChild(label);
+        display.appendChild(container);
+        new QRCode(qrDiv,{text:getQRData(index),width:200,height:200,colorDark:'#000',colorLight:'#fff',correctLevel:correctLevel});
+    }
+    const pagination = document.getElementById('gridPagination');
+    const info = document.getElementById('gridPageInfo');
+    if (pagination) pagination.style.display = totalPages > 1 ? 'flex' : 'none';
+    if (info) info.textContent = `第 ${gridPage + 1} / ${totalPages} 页 · 每页最多12张`;
+}
+function setGridPage(page) { renderGridPage(page); }
 
 // ===== Universal QR Generation Functions (T012-T015) =====
 
@@ -1095,6 +1163,7 @@ function generateUniversalQR(text) {
     const display = document.getElementById('qrDisplay');
     display.innerHTML = '';
     qrCodes = [];
+    currentQRSource = null;
     qrCache = {};
     retransmitIndices = null;
     clearMessages();
@@ -1265,7 +1334,22 @@ if (new URLSearchParams(window.location.search).get('test') === '1') {
         fullscreenUsesDisplaySize: function() {
             const content = document.getElementById('singleQRContent');
             return !!content && content.style.getPropertyValue('--display-qr-size') === displayQRSize + 'px';
-        }
+        },
+        getFilePolicy: getFilePolicy,
+        simulateLazyFileSource: function(size, level) {
+            const base64Length = Math.ceil(size / 3) * 4;
+            const base64 = 'A'.repeat(base64Length);
+            const source = createLazyV2FileSource(base64, '0123456789abcdef', {n:'x.bin',y:'application/octet-stream',s:size,h:'0'.repeat(64)}, level);
+            const first = source.getData(0); const last = source.getData(source.length - 1);
+            return { total:source.length, materializedFragments:source.materializedCount, getPayloadCalls:source.payloadCalls - 2, firstPayload:first, lastPayload:last };
+        },
+        simulateRendererBounds: function(total, accesses) {
+            const cache = new Map();
+            for (let i=0;i<accesses;i++) { const key=i%total; if(cache.has(key))cache.delete(key); cache.set(key,true); while(cache.size>QR_CACHE_LIMIT)cache.delete(cache.keys().next().value); }
+            return { gridItems:Math.min(total, GRID_PAGE_SIZE), cacheItems:cache.size };
+        },
+        parseFragmentSelection: parseFragmentSelection,
+        testLimitBeforeRead: function(size) { let reads=0; const policy=getFilePolicy(size,'H'); if(policy.accepted)reads++; return {accepted:policy.accepted,readCalls:reads}; }
     });
 }
 
@@ -1453,17 +1537,19 @@ function showQRCode(index) {
     const contentDiv = document.getElementById('singleQRContent');
     const infoDiv = document.getElementById('singleQRInfo');
 
-    if (contentDiv && qrCodes[index]) {
+    const qrData = getQRData(index);
+    if (contentDiv && qrData !== undefined) {
         // Check QR cache for a pre-rendered data URL image
-        if (qrCache[index]) {
-            contentDiv.innerHTML = '<img src="' + qrCache[index] + '" style="max-width:100%;max-height:100%;">';
+        if (qrCache instanceof Map && qrCache.has(index)) {
+            const cached = qrCache.get(index); qrCache.delete(index); qrCache.set(index, cached);
+            contentDiv.innerHTML = '<img src="' + cached + '" style="max-width:100%;max-height:100%;">';
         } else {
             contentDiv.innerHTML = '';
             const vw = Math.min(window.innerWidth * 0.9, window.innerHeight * 0.8);
             const size = Math.floor(vw);
             try {
                 new QRCode(contentDiv, {
-                    text: qrCodes[index].data,
+                    text: qrData,
                     width: size,
                     height: size,
                     colorDark: '#000000',
@@ -1473,7 +1559,11 @@ function showQRCode(index) {
                 // Cache the canvas data URL (canvas is available synchronously after draw)
                 var canvas = contentDiv.querySelector('canvas');
                 if (canvas) {
-                    try { qrCache[index] = canvas.toDataURL('image/png'); } catch(e) {}
+                    try {
+                        if (!(qrCache instanceof Map)) qrCache = new Map();
+                        qrCache.set(index, canvas.toDataURL('image/png'));
+                        while (qrCache.size > QR_CACHE_LIMIT) qrCache.delete(qrCache.keys().next().value);
+                    } catch(e) {}
                 }
             } catch (e) {
                 console.error('Generate large QR failed', e);
@@ -1483,7 +1573,7 @@ function showQRCode(index) {
         // Update Info Text
         let infoText = `第 ${index + 1} / ${qrCodes.length} 张`;
         try {
-            const data = JSON.parse(qrCodes[index].data);
+            const data = JSON.parse(qrData);
             if (data.type === 'file' && (data.meta || data.metadata)) {
                 const meta = data.meta || data.metadata;
                 const name = meta.n || meta.fileName;
@@ -1501,6 +1591,7 @@ function showQRCode(index) {
 }
 
 function showAllQRCodes() {
+    if (currentQRSource) { renderGridPage(gridPage); return; }
     qrCodes.forEach(item => {
         if (item && item.element) {
             item.element.style.display = 'block';
@@ -1556,13 +1647,30 @@ function jumpToPage() {
 function updateSingleModeSelector() {
     const selector = document.getElementById('qrSelector');
     selector.innerHTML = '';
-    for (let i = 0; i < qrCodes.length; i++) {
+    const count = getQRCount();
+    if (count > 1000) {
+        const option = document.createElement('option'); option.value = 0; option.textContent = `共 ${count} 张，请使用页码输入`; selector.appendChild(option); return;
+    }
+    for (let i = 0; i < count; i++) {
         const option = document.createElement('option');
         option.value = i;
         option.textContent = `第 ${i + 1} 张 / 共 ${qrCodes.length} 张`;
         selector.appendChild(option);
     }
     selector.value = currentIndex;
+}
+
+function parseFragmentSelection(raw, total) {
+    const parts = String(raw || '').split(/[,，、\s]+/).filter(Boolean);
+    const values = new Set(); const invalid = [];
+    parts.forEach(function(part) {
+        const match = part.match(/^(\d+)(?:-(\d+))?$/);
+        if (!match) { invalid.push(part); return; }
+        const start = Number(match[1]); const end = match[2] ? Number(match[2]) : start;
+        if (start < 1 || end < start || end > total) { invalid.push(part); return; }
+        for (let value = start; value <= end; value++) values.add(value - 1);
+    });
+    return { indices:Array.from(values).sort(function(a,b){return a-b;}), invalid:invalid };
 }
 
 // 即时更新循环速度
@@ -1683,19 +1791,9 @@ function applyFragmentNumbers() {
         return;
     }
 
-    // 解析逗号/空格/顿号分隔的数字
-    var parts = raw.split(/[,，、\s]+/).filter(function(s) { return s.length > 0; });
-    var indices = [];
-    var invalid = [];
-
-    for (var i = 0; i < parts.length; i++) {
-        var n = parseInt(parts[i], 10);
-        if (isNaN(n) || n < 1 || n > qrCodes.length) {
-            invalid.push(parts[i]);
-        } else if (indices.indexOf(n - 1) === -1) {
-            indices.push(n - 1); // 转为 0-based
-        }
-    }
+    var parsed = parseFragmentSelection(raw, getQRCount());
+    var indices = parsed.indices;
+    var invalid = parsed.invalid;
 
     if (invalid.length > 0) {
         if (statusEl) {
