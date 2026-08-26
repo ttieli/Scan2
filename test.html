@@ -10460,6 +10460,12 @@ const tests = [
     { id: 'T27', name: '文件操作能力与预览类型分流', type: 'download' },
     { id: 'T28', name: 'File元数据与延迟回收', type: 'download' },
     { id: 'T29', name: '生产文件操作UI与会话保留', type: 'download' },
+    { id: 'T30', name: '大文件策略与20MiB硬限制', type: 'large' },
+    { id: 'T31', name: '惰性片段源不物化数组', type: 'large' },
+    { id: 'T32', name: '虚拟分页、LRU与范围补传', type: 'large' },
+    { id: 'T33', name: '接收位图O(1)计数与聚合进度', type: 'large' },
+    { id: 'T34', name: 'IndexedDB大文件片段恢复清理', type: 'large' },
+    { id: 'T35', name: '超限文件读取前拒绝', type: 'large' },
 ];
 
 // Render test list
@@ -11207,6 +11213,76 @@ async function testProductionFileActionsUI(id) {
     });
 }
 
+async function testLargeFilePolicy(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender && sender.getFilePolicy, '大文件策略 API 尚未实现');
+        const five = 5 * 1024 * 1024;
+        const twenty = 20 * 1024 * 1024;
+        requireCondition(sender.getFilePolicy(five, 'H').effectiveLevel === 'H', '5MiB不应强制L');
+        requireCondition(sender.getFilePolicy(five + 1, 'H').effectiveLevel === 'L', '超5MiB未进入L模式');
+        requireCondition(sender.getFilePolicy(twenty, 'Q').accepted === true, '20MiB边界应允许');
+        requireCondition(sender.getFilePolicy(twenty + 1, 'L').accepted === false, '超20MiB未拒绝');
+    });
+}
+
+async function testLazyFragmentSource(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender && sender.simulateLazyFileSource, '惰性片段 API 尚未实现');
+        const stats = sender.simulateLazyFileSource(5 * 1024 * 1024, 'H');
+        requireCondition(stats.total > 100000, '5MiB H片数异常');
+        requireCondition(stats.materializedFragments === 0, '惰性源物化了片段数组');
+        requireCondition(stats.firstPayload.includes('"i":0') && stats.lastPayload.includes('"i":' + (stats.total - 1)), '惰性首尾载荷错误');
+    });
+}
+
+async function testVirtualRendererAndRanges(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender && sender.simulateRendererBounds, '虚拟渲染 API 尚未实现');
+        const stats = sender.simulateRendererBounds(134434, 1000);
+        requireCondition(stats.gridItems <= 12 && stats.cacheItems <= 8, 'DOM或缓存未有界');
+        const parsed = sender.parseFragmentSelection('1-3, 8，10-12', 20);
+        requireCondition(JSON.stringify(parsed.indices) === JSON.stringify([0,1,2,7,9,10,11]), '范围解析错误');
+        requireCondition(sender.parseFragmentSelection('5-2', 20).invalid.length === 1, '逆序范围未拒绝');
+    });
+}
+
+async function testReceiverBitsetAndProgress(id) {
+    return runProductionTest(id, async function() {
+        const receiver = getProductionAPI('receiver');
+        requireCondition(receiver && receiver.simulateLargeState, '接收位图 API 尚未实现');
+        const state = receiver.simulateLargeState(134434, [0, 1, 1, 50000, 134433]);
+        requireCondition(state.receivedCount === 4, '重复片计数错误');
+        requireCondition(state.bitsetBytes === Math.ceil(134434 / 8), '位图大小错误');
+        requireCondition(state.fragmentObjectKeys === 0, '大状态仍保存片段对象');
+        const progress = receiver.renderLargeProgressForTest(134434, [0, 50000, 134433]);
+        requireCondition(progress.bucketCount <= 200, '聚合进度DOM超限');
+    });
+}
+
+async function testIndexedDBLargeStore(id) {
+    return runProductionTest(id, async function() {
+        const receiver = getProductionAPI('receiver');
+        requireCondition(receiver && receiver.testLargeFragmentStore, 'IndexedDB大文件 API 尚未实现');
+        const result = await receiver.testLargeFragmentStore();
+        requireCondition(result.stored === 3, 'IndexedDB写入数量错误');
+        requireCondition(JSON.stringify(result.ordered) === JSON.stringify(['A','B','C']), 'IndexedDB顺序读取错误');
+        requireCondition(result.remaining === 0, 'IndexedDB清理失败');
+        requireCondition(result.headerHasFragments === false, '会话头包含完整片段数据');
+    });
+}
+
+async function testFileLimitBeforeRead(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender && sender.testLimitBeforeRead, '读取前限制 API 尚未实现');
+        const result = sender.testLimitBeforeRead(20 * 1024 * 1024 + 1);
+        requireCondition(result.accepted === false && result.readCalls === 0, '超限文件仍进入读取');
+    });
+}
+
 // ============================================================
 // Main test runner
 // ============================================================
@@ -11289,6 +11365,12 @@ async function runAllTests() {
                     case 'T29':
                         ok = await testProductionFileActionsUI('T29');
                         break;
+                    case 'T30': ok = await testLargeFilePolicy('T30'); break;
+                    case 'T31': ok = await testLazyFragmentSource('T31'); break;
+                    case 'T32': ok = await testVirtualRendererAndRanges('T32'); break;
+                    case 'T33': ok = await testReceiverBitsetAndProgress('T33'); break;
+                    case 'T34': ok = await testIndexedDBLargeStore('T34'); break;
+                    case 'T35': ok = await testFileLimitBeforeRead('T35'); break;
                 }
                 if (ok) passed++;
                 resolve();
