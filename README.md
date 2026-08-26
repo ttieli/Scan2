@@ -69,6 +69,13 @@ Loop and Single modes share a 160–360px size slider in the fullscreen viewer. 
 - On iOS, downloads are normally in **Files → Downloads**. The exact location is controlled by **Settings → Apps → Safari → Downloads** and cannot be forced by a webpage.
 - Other browsers may save automatically, ask for a destination, or open a supported file type. Check the browser download list or system file manager.
 
+### Large File Safety
+
+- Files through 5MiB support the selected correction level.
+- Files over 5MiB and through 20MiB enter L-only long mode after confirmation; physical scanning can take hours.
+- Files over 20MiB are rejected before reading to protect low-memory browsers.
+- The sender renders at most 12 grid QR codes and caches at most eight fullscreen codes. Large receiver progress is aggregated into at most 200 buckets and file fragments are persisted in IndexedDB.
+
 ## How It Works
 
 ```
@@ -169,6 +176,13 @@ Sender                              Receiver
 - PDF、文本、图片、音频和视频会额外显示**打开预览**。
 - iOS 下载通常位于**文件 App → 下载项**；确切位置由“设置 → App → Safari → 下载项”决定，网页无法强制指定。
 - 其他浏览器可能自动保存、询问目录或直接打开支持的文件类型，请检查浏览器下载列表或系统文件管理器。
+
+### 大文件安全策略
+
+- 5MiB 以内保留用户选择的纠错级别。
+- 大于 5MiB、且不超过 20MiB 时，确认后进入仅 L 级的超长模式；实际扫描可能持续数小时。
+- 超过 20MiB 会在读取前直接拒绝，避免低内存浏览器卡死。
+- 发送端网格最多渲染 12 张、全屏缓存最多 8 张；接收端大文件进度最多聚合为 200 桶，片段使用 IndexedDB 持久化。
 
 ## 工作原理
 
