@@ -10455,6 +10455,11 @@ const tests = [
     { id: 'T22', name: '生产接收 UI 完成与下载状态', type: 'ui' },
     { id: 'T23', name: '公有中文容量边界预留 BOM', type: 'qr' },
     { id: 'T24', name: '仅显示一个纠错级别选择器', type: 'ui' },
+    { id: 'T25', name: '二维码尺寸默认值与边界', type: 'ui' },
+    { id: 'T26', name: '尺寸仅作用于循环和单张', type: 'ui' },
+    { id: 'T27', name: '文件操作能力与预览类型分流', type: 'download' },
+    { id: 'T28', name: 'File元数据与延迟回收', type: 'download' },
+    { id: 'T29', name: '生产文件操作UI与会话保留', type: 'download' },
 ];
 
 // Render test list
@@ -11116,6 +11121,92 @@ async function testErrorLevelControlCount(id) {
     });
 }
 
+async function testQRDisplaySizeBounds(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender && sender.getDisplayQRSize, '二维码尺寸 API 尚未实现');
+        sender.resetDisplayQRSizeForTest();
+        requireCondition(sender.getDisplayQRSize() === 220, '默认尺寸不是220px');
+        requireCondition(sender.normalizeDisplayQRSize(100) === 160, '下限截断失败');
+        requireCondition(sender.normalizeDisplayQRSize(999) === 360, '上限截断失败');
+        requireCondition(sender.normalizeDisplayQRSize('bad') === 220, '非法值未回退');
+        requireCondition(sender.normalizeDisplayQRSize(271) === 280, '步进对齐失败');
+        sender.setDisplayQRSize(280);
+        requireCondition(sender.getDisplayQRSize() === 280, '尺寸未即时更新');
+        requireCondition(sender.getPersistedDisplayQRSize() === '280', '尺寸未持久化');
+        sender.resetDisplayQRSizeForTest();
+    });
+}
+
+async function testQRDisplaySizeModes(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender && sender.getSizeControlState, '尺寸模式 API 尚未实现');
+        sender.setDisplayQRSize(240);
+        const grid = sender.getSizeControlState('grid');
+        const loop = sender.getSizeControlState('loop');
+        const single = sender.getSizeControlState('single');
+        requireCondition(grid.visible === false, '网格显示了尺寸控件');
+        requireCondition(loop.visible === true && loop.size === 240, '循环尺寸控件错误');
+        requireCondition(single.visible === true && single.size === 240, '单张尺寸控件错误');
+        requireCondition(sender.loopUsesTransformScale() === false, '循环仍整体缩放卡片');
+        requireCondition(sender.fullscreenUsesDisplaySize() === false, '全屏错误继承普通尺寸');
+        sender.resetDisplayQRSizeForTest();
+    });
+}
+
+async function testFileActionCapabilities(id) {
+    return runProductionTest(id, async function() {
+        const receiver = getProductionAPI('receiver');
+        requireCondition(receiver && receiver.isPreviewableMime, '文件操作能力 API 尚未实现');
+        requireCondition(receiver.isPreviewableMime('application/pdf') === true, 'PDF应可预览');
+        requireCondition(receiver.isPreviewableMime('text/plain') === true, '文本应可预览');
+        requireCondition(receiver.isPreviewableMime('image/png') === true, '图片应可预览');
+        requireCondition(receiver.isPreviewableMime('audio/mpeg') === true, '音频应可预览');
+        requireCondition(receiver.isPreviewableMime('video/mp4') === true, '视频应可预览');
+        requireCondition(receiver.isPreviewableMime('application/zip') === false, 'ZIP不应预览');
+        const full = receiver.getFileActionAvailability('application/pdf', true);
+        requireCondition(full.share && full.download && full.preview, '完整能力分流错误');
+        const fallback = receiver.getFileActionAvailability('application/zip', false);
+        requireCondition(!fallback.share && fallback.download && !fallback.preview, '后备能力分流错误');
+    });
+}
+
+async function testReceivedFileLifecycle(id) {
+    return runProductionTest(id, async function() {
+        const receiver = getProductionAPI('receiver');
+        requireCondition(receiver && receiver.createReceivedFileForTest, 'File生命周期 API 尚未实现');
+        const file = receiver.createReceivedFileForTest('report.pdf', 'application/pdf', new Uint8Array([1, 2, 3]));
+        requireCondition(file.name === 'report.pdf' && file.type === 'application/pdf' && file.size === 3, 'File元数据错误');
+        requireCondition(receiver.getObjectUrlCleanupDelay() >= 60000, 'Blob URL回收仍过早');
+        const trace = receiver.simulateDirectDownloadForTest(file);
+        requireCondition(trace.downloadName === 'report.pdf', '下载文件名错误');
+        requireCondition(trace.cleanupDelay >= 60000, '下载URL未延迟回收');
+        requireCondition(trace.sessionCleared === false, '直接下载清除了会话');
+        requireCondition(trace.feedback.includes('已请求下载'), '下载反馈仍虚报成功');
+    });
+}
+
+async function testProductionFileActionsUI(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        const receiver = getProductionAPI('receiver');
+        requireCondition(sender && receiver && receiver.configureFileActionsForTest, '文件操作UI测试 API 尚未实现');
+        const transfer = await sender.buildFileTransfer(new TextEncoder().encode('pdf-content'), '结果.pdf', 'application/pdf', 'H');
+        receiver.reset();
+        transfer.fragments.forEach(function(fragment) { receiver.handle(fragment); });
+        await new Promise(function(resolve) { setTimeout(resolve, 50); });
+        receiver.configureFileActionsForTest(true);
+        const ui = receiver.fileActionSnapshot();
+        requireCondition(ui.shareVisible && ui.downloadVisible && ui.previewVisible, 'PDF操作按钮不完整');
+        requireCondition(ui.hint.includes('文件') || ui.hint.includes('下载'), '缺少下载位置提示');
+        requireCondition(ui.activeTransfer === transfer.id, '配置文件操作时丢失会话');
+        receiver.simulateShareCancelForTest();
+        requireCondition(receiver.snapshot().id === transfer.id, '取消分享后会话丢失');
+        receiver.reset();
+    });
+}
+
 // ============================================================
 // Main test runner
 // ============================================================
@@ -11182,6 +11273,21 @@ async function runAllTests() {
                         break;
                     case 'T24':
                         ok = await testErrorLevelControlCount('T24');
+                        break;
+                    case 'T25':
+                        ok = await testQRDisplaySizeBounds('T25');
+                        break;
+                    case 'T26':
+                        ok = await testQRDisplaySizeModes('T26');
+                        break;
+                    case 'T27':
+                        ok = await testFileActionCapabilities('T27');
+                        break;
+                    case 'T28':
+                        ok = await testReceivedFileLifecycle('T28');
+                        break;
+                    case 'T29':
+                        ok = await testProductionFileActionsUI('T29');
                         break;
                 }
                 if (ok) passed++;
