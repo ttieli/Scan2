@@ -36,12 +36,26 @@ A 50 KB document transfers in under 30 seconds on M level. Not blazing fast, but
 ## Features
 
 - **100% Offline** — no server, no network, no cloud. Data never leaves your devices.
+- **Public Text QR** — plain UTF-8 QR codes that any standard scanner can read, split into readable numbered parts when needed.
+- **Private Fast Transfer** — private text and files use the compact V2 sequence protocol for rapid continuous scanning and automatic reassembly.
 - **Any File Type** — PDFs, images, code, zips, binaries, markdown, anything.
 - **Smart Chunking** — files are automatically split into scannable QR code sequences.
 - **Smart Retransmit** — missed a few QR codes? The receiver shows exactly which numbers are missing with a one-tap copy button. Paste them into the sender to replay only those fragments.
 - **Session Recovery** — progress is saved automatically. Close the page, reopen, keep scanning.
 - **Visual Progress Map** — see exactly which fragments have been received and which are missing.
+- **Strong Integrity** — files and private text are verified with SHA-256 before completion; corrupted files cannot be downloaded.
+- **Order Independent** — scanning may start at any fragment. The receiver keeps early data until metadata arrives and rejects fragments from other transfers.
 - **Bilingual** — Chinese and English, auto-detected.
+
+## Transfer Modes
+
+| Data | Mode | Compatible Scanner | Behavior |
+|---|---|---|---|
+| Text | Public | Any QR scanner | Plain UTF-8 text; long content becomes independently readable numbered QR codes |
+| Text | Private | QR Transfer receiver | Fast V2 sequence scanning, automatic reassembly, recovery, and retransmit |
+| File | Private | QR Transfer receiver | V2 sequence scanning, SHA-256 verification, and download |
+
+`sender.html` and `receiver.html` are each fully self-contained. Neither page needs a CDN, an external JavaScript file, a server, or a build step. Private V2 transfers have a stable transfer ID; while one transfer is active, fragments from other transfers are ignored until you choose **Start Over**.
 
 ## How It Works
 
@@ -111,12 +125,26 @@ Sender                              Receiver
 ## 功能亮点
 
 - **完全离线** — 没有服务器，没有网络，没有云端。数据不会离开你的设备。
+- **公有文本二维码** — 使用原始 UTF-8 明文，任意标准二维码扫描器都能读取；长文本自动拆成带可读序号的多张二维码。
+- **私有快速传输** — 私有文本和文件采用紧凑 V2 序列协议，可连续快速扫描并自动拼接。
 - **支持任意文件** — PDF、图片、代码、压缩包、二进制、Markdown，随便什么都行。
 - **智能分片** — 文件自动拆分为手机摄像头能可靠扫描的二维码序列。
 - **智能补传** — 漏扫了几张？接收端直接显示缺失编号，一键复制，粘贴到发送端就只循环那几张。
 - **断点续传** — 进度自动保存。关掉页面再打开，继续扫。
 - **可视化进度** — 实时看到哪些片段已收到、哪些还缺。
+- **强完整性校验** — 文件和私有文本完成前使用 SHA-256 校验；损坏文件不会开放下载。
+- **不依赖扫描顺序** — 可以从任意片开始扫描；元数据晚到不会清空进度，其他传输的片段不会混入当前会话。
 - **中英双语** — 自动检测语言，也可手动切换。
+
+## 传输模式
+
+| 数据 | 模式 | 支持的扫描器 | 行为 |
+|---|---|---|---|
+| 文本 | 公有 | 任意二维码扫描器 | 原始 UTF-8 明文；长内容拆成可独立读取、带序号的二维码 |
+| 文本 | 私有 | QR Transfer 接收端 | V2 快速连续扫描、自动拼接、恢复和补传 |
+| 文件 | 私有 | QR Transfer 接收端 | V2 连续扫描、SHA-256 校验和下载 |
+
+`sender.html` 和 `receiver.html` 各自都是完整自包含页面，不需要 CDN、外部 JavaScript、服务器或构建步骤。私有 V2 传输使用稳定传输 ID；当前传输未结束时，其他传输的片段会被忽略，选择“重新开始”后才能切换。
 
 ## 工作原理
 

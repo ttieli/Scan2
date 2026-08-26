@@ -11918,6 +11918,15 @@ if (new URLSearchParams(window.location.search).get('test') === '1') {
         exportSession: exportV2Session,
         restore: restoreV2Session,
         verify: verifyV2Transfer,
+        handle: handleV2Fragment,
+        uiSnapshot: function() {
+            return {
+                state: currentUIState,
+                fileName: document.getElementById('downloadFileName').textContent,
+                downloadDisabled: document.getElementById('downloadBtn').disabled,
+                checksumErrorVisible: window.getComputedStyle(document.getElementById('checksumError')).display !== 'none'
+            };
+        },
         renderRecoveryName: function(fileName) {
             showRecoveryBanner({
                 version: 2,

@@ -86,6 +86,9 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3
 .estimate strong { color: var(--warning); }
 /* Hidden mode selection */
 .mode-selection { display: none; }
+.text-protocol-selector { display:flex; gap:6px; margin-top:12px; padding:4px; background:var(--bg-input); border:1px solid var(--border); border-radius:12px; }
+.text-protocol-btn { flex:1; border:0; border-radius:9px; padding:10px 12px; background:transparent; color:var(--text-secondary); cursor:pointer; font-weight:600; }
+.text-protocol-btn.active { background:var(--accent); color:#fff; }
 /* Details/summary */
 details summary { color: var(--text-secondary); font-size: 0.9rem; cursor: pointer; }
 details summary:hover { color: var(--text-primary); }
@@ -140,6 +143,10 @@ details summary:hover { color: var(--text-primary); }
         <!-- Text Tab -->
         <div id="tab-text">
             <textarea id="textInput" data-placeholder-zh="输入要传输的文本..." data-placeholder-en="Enter text to transfer..." placeholder="输入要传输的文本..."></textarea>
+            <div class="text-protocol-selector" id="textModeSelector" aria-label="文本二维码模式">
+                <button type="button" class="text-protocol-btn active" data-text-mode="universal" onclick="setTextProtocolMode('universal')" data-zh="公有 · 任意扫描器" data-en="Public · Any Scanner">公有 · 任意扫描器</button>
+                <button type="button" class="text-protocol-btn" data-text-mode="private" onclick="setTextProtocolMode('private')" data-zh="私有 · 快速拼接" data-en="Private · Fast Reassembly">私有 · 快速拼接</button>
+            </div>
         </div>
 
         <!-- File Tab -->
@@ -178,8 +185,8 @@ details summary:hover { color: var(--text-primary); }
         <!-- Hidden mode selection (auto-set by JS) -->
         <div class="mode-selection" style="display:none;">
             <div style="display: flex; gap: 15px;">
-                <label><input type="radio" name="qrMode" value="universal" onchange="handleModeChange()"><span><strong>通用模式</strong></span></label>
-                <label><input type="radio" name="qrMode" value="private" checked onchange="handleModeChange()"><span><strong>私有模式</strong></span></label>
+                <label><input type="radio" name="qrMode" value="universal" checked onchange="handleModeChange()"><span><strong>通用模式</strong></span></label>
+                <label><input type="radio" name="qrMode" value="private" onchange="handleModeChange()"><span><strong>私有模式</strong></span></label>
             </div>
         </div>
 
@@ -327,6 +334,22 @@ let currentIndex = 0;
 let loopInterval = null;
 let loopSpeed = 100;
 let qrCache = {}; // { index: innerHTML } for fullscreen QR cache
+let textProtocolMode = 'universal';
+
+function setTextProtocolMode(selectedMode) {
+    if (selectedMode !== 'universal' && selectedMode !== 'private') return false;
+    textProtocolMode = selectedMode;
+    document.querySelectorAll('#textModeSelector .text-protocol-btn').forEach(function(button) {
+        button.classList.toggle('active', button.getAttribute('data-text-mode') === selectedMode);
+    });
+    document.getElementsByName('qrMode').forEach(function(radio) {
+        radio.checked = radio.value === selectedMode;
+    });
+    document.getElementById('universalErrorLevel').value = document.getElementById('errorLevel').value;
+    handleModeChange();
+    updateEstimate();
+    return true;
+}
 
 // ===== Tab Switcher =====
 function switchInputTab(tab) {
@@ -335,7 +358,15 @@ function switchInputTab(tab) {
     });
     document.getElementById('tab-text').style.display = (tab === 'text') ? 'block' : 'none';
     document.getElementById('tab-file').style.display = (tab === 'file') ? 'block' : 'none';
+    document.getElementsByName('qrMode').forEach(function(radio) {
+        radio.checked = radio.value === (tab === 'text' ? textProtocolMode : 'private');
+    });
+    handleModeChange();
     if (typeof updateEstimate === 'function') updateEstimate();
+}
+
+function getActiveInputType() {
+    return document.getElementById('tab-file').style.display !== 'none' ? 'file' : 'text';
 }
 
 // ===== Show display sections after generation =====
@@ -364,32 +395,17 @@ function updateEstimate() {
             hint.style.display = 'none';
             return;
         }
-        var byteLen = new TextEncoder().encode(text).length;
-
-        if (byteLen <= maxCap) {
-            // Universal mode — single QR
-            for (var i = 0; i < radios.length; i++) {
-                radios[i].checked = (radios[i].value === 'universal');
-            }
-            // Sync universal error level
+        for (var i = 0; i < radios.length; i++) {
+            radios[i].checked = radios[i].value === textProtocolMode;
+        }
+        if (textProtocolMode === 'universal') {
             document.getElementById('universalErrorLevel').value = errorLevel;
-            hint.textContent = '将生成 1 个通用二维码（兼容微信/支付宝扫码）';
+            var publicParts = splitPublicText(text, errorLevel);
+            hint.textContent = '将生成 ' + publicParts.length + ' 个公有明文二维码（任意标准扫描器可读）';
             hint.style.display = 'block';
         } else {
-            // Private mode — chunked
-            for (var i = 0; i < radios.length; i++) {
-                radios[i].checked = (radios[i].value === 'private');
-            }
-            var chunkSize = 15;
-            if (text.length > 1000) {
-                chunkSize = Math.min(50, Math.max(25, Math.floor(text.length / 25)));
-            } else if (text.length > 500) {
-                chunkSize = 25;
-            }
-            var qrCount = Math.ceil(text.length / chunkSize);
-            var scanSec = qrCount * 2;
-            var timeStr = scanSec >= 60 ? '~' + Math.ceil(scanSec / 60) + '分钟' : '~' + scanSec + '秒';
-            hint.textContent = '将生成约 ' + qrCount + ' 个二维码（分片模式），预计扫描时间 ' + timeStr;
+            var byteLen = new TextEncoder().encode(text).length;
+            hint.textContent = '私有 V2 快速拼接 · ' + byteLen + ' 字节 · 支持乱序、恢复与补传';
             hint.style.display = 'block';
         }
     } else {
@@ -1084,9 +1100,7 @@ function generateUniversalQR(text) {
 // ===== 应用主要功能 =====
 
 async function generateQR() {
-    // 智能判断：如果私有模式且有文件，生成文件QR；否则生成文本QR
-    if (isModePrivate() && currentFile) {
-        // 优先生成文件QR
+    if (getActiveInputType() === 'file') {
         await generateFileQR();
         return;
     }
@@ -1166,7 +1180,15 @@ if (new URLSearchParams(window.location.search).get('test') === '1') {
         splitPublicText: splitPublicText,
         buildPrivateTextTransfer: buildPrivateTextTransfer,
         buildFileTransfer: buildFileTransfer,
-        sha256Hex: sha256Hex
+        sha256Hex: sha256Hex,
+        getTextModes: function() { return ['universal', 'private']; },
+        selectTextMode: setTextProtocolMode,
+        getSelectedMode: getSelectedMode,
+        textModeSelectorVisible: function() {
+            return window.getComputedStyle(document.getElementById('textModeSelector')).display !== 'none';
+        },
+        selectInputTab: switchInputTab,
+        getActiveInputType: getActiveInputType
     });
 }
 

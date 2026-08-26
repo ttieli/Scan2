@@ -99,8 +99,8 @@
     </div>
 
     <div id="qrWorkspace"></div>
-    <iframe id="senderTestFrame" src="sender.html?test=1" hidden></iframe>
-    <iframe id="receiverTestFrame" src="receiver.html?test=1" hidden></iframe>
+    <iframe id="senderTestFrame" src="sender.html?test=1&amp;v=7" hidden></iframe>
+    <iframe id="receiverTestFrame" src="receiver.html?test=1&amp;v=7" hidden></iframe>
 
 <script>
 // 内嵌 qrcode.min.js
@@ -10440,19 +10440,6 @@ function log(msg, cls) {
 // ============================================================
 
 const tests = [
-    { id: 'T1', name: '短文本 (ASCII)', type: 'text' },
-    { id: 'T2', name: '中文文本 (UTF-8)', type: 'text' },
-    { id: 'T3', name: '长文本 (多片)', type: 'text' },
-    { id: 'T4', name: '文件模拟 (1KB)', type: 'file' },
-    { id: 'T5', name: '中文文件名 (元数据开销)', type: 'file' },
-    { id: 'T5b', name: 'Emoji文件名 (🦞 surrogate)', type: 'file' },
-    { id: 'T6a', name: '纠错 L + 中文文件名', type: 'file' },
-    { id: 'T6b', name: '纠错 M + 中文文件名', type: 'file' },
-    { id: 'T6c', name: '纠错 Q + 中文文件名', type: 'file' },
-    { id: 'T6d', name: '纠错 H + 中文文件名', type: 'file' },
-    { id: 'T7', name: '补传编号解析', type: 'retransmit' },
-    { id: 'T8', name: '部分片段传输E2E（文本）', type: 'retransmit' },
-    { id: 'T9', name: '部分片段传输E2E（文件）', type: 'retransmit' },
     { id: 'T10', name: '公有文本保持标准明文', type: 'v2' },
     { id: 'T11', name: '发送端文件 V2 协议', type: 'v2' },
     { id: 'T12', name: '文件元数据晚到不丢片', type: 'v2' },
@@ -10462,6 +10449,10 @@ const tests = [
     { id: 'T16', name: '恶意文件名纯文本渲染', type: 'security' },
     { id: 'T17', name: 'SHA-256 损坏阻断', type: 'security' },
     { id: 'T18', name: '生产 V2 文本与文件往返', type: 'v2' },
+    { id: 'T19', name: '生产 V2 标准 QR 编解码', type: 'v2' },
+    { id: 'T20', name: '文本公有/私有模式显式可选', type: 'ui' },
+    { id: 'T21', name: '文本与文件按当前标签路由', type: 'ui' },
+    { id: 'T22', name: '生产接收 UI 完成与下载状态', type: 'ui' },
 ];
 
 // Render test list
@@ -10883,12 +10874,16 @@ async function testPublicTextV2(id) {
         requireCondition(sender, 'QRSenderTestAPI 尚未实现');
         const single = sender.splitPublicText('你好🙂 QR', 'H');
         requireCondition(single.length === 1 && single[0] === '你好🙂 QR', '单片公有文本不是原始明文');
+        const singleDecoded = encodeAndDecode(single[0], 'H');
+        requireCondition(singleDecoded.success && singleDecoded.data === single[0], '单片公有QR不能标准解码');
         const parts = sender.splitPublicText('你好🙂'.repeat(800), 'H');
         requireCondition(parts.length > 1, '长文本没有拆分');
         parts.forEach(function(part, index) {
             requireCondition(part.startsWith(`【QR文本 ${index + 1}/${parts.length}】\n`), '多片序号前缀错误');
             requireCondition(!/%[0-9A-F]{2}/i.test(part), '公有文本被 percent-encode');
         });
+        const firstDecoded = encodeAndDecode(parts[0], 'H');
+        requireCondition(firstDecoded.success && firstDecoded.data === parts[0], '多片公有QR不能标准解码');
     });
 }
 
@@ -11030,6 +11025,70 @@ async function testProductionRoundtripV2(id) {
     });
 }
 
+async function testV2QRCodec(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender, 'QRSenderTestAPI 尚未实现');
+        const levels = ['L', 'M', 'Q', 'H'];
+        for (const level of levels) {
+            const bytes = new Uint8Array(256);
+            crypto.getRandomValues(bytes);
+            const transfer = await sender.buildFileTransfer(bytes, `QR-${level}-测试.bin`, 'application/octet-stream', level);
+            for (const fragment of transfer.fragments) {
+                const payload = JSON.stringify(fragment);
+                const decoded = encodeAndDecode(payload, level);
+                requireCondition(decoded.success, `${level}级QR编码失败: ${decoded.error || ''}`);
+                requireCondition(decoded.data === payload, `${level}级QR解码载荷不一致`);
+            }
+        }
+    });
+}
+
+async function testTextModeSelection(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender && sender.getTextModes, '文本模式选择 API 尚未实现');
+        requireCondition(JSON.stringify(sender.getTextModes()) === JSON.stringify(['universal', 'private']), '文本模式选项错误');
+        sender.selectTextMode('universal');
+        requireCondition(sender.getSelectedMode() === 'universal', '无法选择公有文本');
+        sender.selectTextMode('private');
+        requireCondition(sender.getSelectedMode() === 'private', '无法选择私有文本');
+        requireCondition(sender.textModeSelectorVisible(), '文本模式选择器不可见');
+    });
+}
+
+async function testInputTabRouting(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender && sender.selectInputTab, '输入标签测试 API 尚未实现');
+        sender.selectInputTab('file');
+        requireCondition(sender.getActiveInputType() === 'file', '文件标签未成为活动输入');
+        sender.selectInputTab('text');
+        sender.selectTextMode('private');
+        requireCondition(sender.getActiveInputType() === 'text', '切回文本后仍被文件输入劫持');
+    });
+}
+
+async function testReceiverUICompletion(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        const receiver = getProductionAPI('receiver');
+        requireCondition(sender && receiver && receiver.handle, '接收 UI 测试 API 尚未实现');
+        const bytes = new TextEncoder().encode('UI completion file');
+        const transfer = await sender.buildFileTransfer(bytes, 'UI完成测试.bin', 'application/octet-stream', 'H');
+        receiver.reset();
+        transfer.fragments.slice(1).reverse().concat(transfer.fragments[0]).forEach(function(fragment) {
+            receiver.handle(fragment);
+        });
+        await new Promise(function(resolve) { setTimeout(resolve, 50); });
+        const ui = receiver.uiSnapshot();
+        requireCondition(ui.state === 'complete', '接收 UI 未进入完成状态');
+        requireCondition(ui.fileName === 'UI完成测试.bin', '接收 UI 文件名错误');
+        requireCondition(ui.downloadDisabled === false, '校验通过后下载按钮仍禁用');
+        requireCondition(ui.checksumErrorVisible === false, '正常文件错误显示校验失败');
+    });
+}
+
 // ============================================================
 // Main test runner
 // ============================================================
@@ -11051,51 +11110,7 @@ async function runAllTests() {
         return new Promise(resolve => {
             setTimeout(async () => {
                 let ok = false;
-                const fileData1KB = randomBytes(1024);
-                const cnFileName = '微信图片_20260202172938_测试.png';
-
                 switch (tests[i].id) {
-                    case 'T1':
-                        ok = testTextPipeline('T1', 'Hello World! This is a QR transfer test.', 'H');
-                        break;
-                    case 'T2':
-                        ok = testTextPipeline('T2', '你好世界，这是QR传输测试。中文字符编码验证：一二三四五六七八九十。', 'H');
-                        break;
-                    case 'T3': {
-                        const longText = '这是一段较长的测试文本，用于验证多片分片和重组功能。ABCDEFGHIJKLMNOPQRSTUVWXYZ。'.repeat(20);
-                        ok = testTextPipeline('T3', longText, 'H');
-                        break;
-                    }
-                    case 'T4':
-                        ok = testFilePipeline('T4', 'test_file.png', 'image/png', fileData1KB, 'H');
-                        break;
-                    case 'T5':
-                        ok = testFilePipeline('T5', cnFileName, 'image/png', fileData1KB, 'H');
-                        break;
-                    case 'T5b':
-                        ok = testFilePipeline('T5b', '2026-01-26-214928 - Clawdbot 🦞.md', 'text/markdown', fileData1KB, 'H');
-                        break;
-                    case 'T6a':
-                        ok = testFilePipeline('T6a', cnFileName, 'image/png', fileData1KB, 'L');
-                        break;
-                    case 'T6b':
-                        ok = testFilePipeline('T6b', cnFileName, 'image/png', fileData1KB, 'M');
-                        break;
-                    case 'T6c':
-                        ok = testFilePipeline('T6c', cnFileName, 'image/png', fileData1KB, 'Q');
-                        break;
-                    case 'T6d':
-                        ok = testFilePipeline('T6d', cnFileName, 'image/png', fileData1KB, 'H');
-                        break;
-                    case 'T7':
-                        ok = testParseFragmentNumbers('T7');
-                        break;
-                    case 'T8':
-                        ok = testPartialTextRetransmit('T8');
-                        break;
-                    case 'T9':
-                        ok = testPartialFileRetransmit('T9');
-                        break;
                     case 'T10':
                         ok = await testPublicTextV2('T10');
                         break;
@@ -11123,6 +11138,18 @@ async function runAllTests() {
                     case 'T18':
                         ok = await testProductionRoundtripV2('T18');
                         break;
+                    case 'T19':
+                        ok = await testV2QRCodec('T19');
+                        break;
+                    case 'T20':
+                        ok = await testTextModeSelection('T20');
+                        break;
+                    case 'T21':
+                        ok = await testInputTabRouting('T21');
+                        break;
+                    case 'T22':
+                        ok = await testReceiverUICompletion('T22');
+                        break;
                 }
                 if (ok) passed++;
                 resolve();
@@ -11133,6 +11160,11 @@ async function runAllTests() {
     for (let i = 0; i < total; i++) {
         await runNext(i);
     }
+
+    // Production iframes share the loopback origin. Always remove test session
+    // state so opening receiver.html after the suite never shows test data.
+    const receiverAPI = getProductionAPI('receiver');
+    if (receiverAPI) receiverAPI.reset();
 
     // Summary
     const summaryEl = document.getElementById('summary');
