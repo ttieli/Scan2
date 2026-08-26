@@ -99,6 +99,8 @@
     </div>
 
     <div id="qrWorkspace"></div>
+    <iframe id="senderTestFrame" src="sender.html?test=1" hidden></iframe>
+    <iframe id="receiverTestFrame" src="receiver.html?test=1" hidden></iframe>
 
 <script>
 // 内嵌 qrcode.min.js
@@ -10451,6 +10453,15 @@ const tests = [
     { id: 'T7', name: '补传编号解析', type: 'retransmit' },
     { id: 'T8', name: '部分片段传输E2E（文本）', type: 'retransmit' },
     { id: 'T9', name: '部分片段传输E2E（文件）', type: 'retransmit' },
+    { id: 'T10', name: '公有文本保持标准明文', type: 'v2' },
+    { id: 'T11', name: '发送端文件 V2 协议', type: 'v2' },
+    { id: 'T12', name: '文件元数据晚到不丢片', type: 'v2' },
+    { id: 'T13', name: '不同传输片段不串片', type: 'v2' },
+    { id: 'T14', name: '非法 V2 片段拒绝', type: 'v2' },
+    { id: 'T15', name: '无元数据会话恢复', type: 'v2' },
+    { id: 'T16', name: '恶意文件名纯文本渲染', type: 'security' },
+    { id: 'T17', name: 'SHA-256 损坏阻断', type: 'security' },
+    { id: 'T18', name: '生产 V2 文本与文件往返', type: 'v2' },
 ];
 
 // Render test list
@@ -10836,6 +10847,190 @@ function testPartialFileRetransmit(id) {
 }
 
 // ============================================================
+// V2 production-page contract tests
+// ============================================================
+
+function getProductionAPI(kind) {
+    var frame = document.getElementById(kind === 'sender' ? 'senderTestFrame' : 'receiverTestFrame');
+    if (!frame || !frame.contentWindow) return null;
+    return kind === 'sender' ? frame.contentWindow.QRSenderTestAPI : frame.contentWindow.QRReceiverTestAPI;
+}
+
+async function runProductionTest(id, body) {
+    setTestRunning(id);
+    const start = performance.now();
+    try {
+        await body();
+        const elapsed = (performance.now() - start).toFixed(0);
+        log(`[${id}] ✅ 通过 (${elapsed}ms)`, 'ok');
+        setTestResult(id, true, `${elapsed}ms`);
+        return true;
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        log(`[${id}] ❌ ${message}`, 'err');
+        setTestResult(id, false, message);
+        return false;
+    }
+}
+
+function requireCondition(condition, message) {
+    if (!condition) throw new Error(message);
+}
+
+async function testPublicTextV2(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender, 'QRSenderTestAPI 尚未实现');
+        const single = sender.splitPublicText('你好🙂 QR', 'H');
+        requireCondition(single.length === 1 && single[0] === '你好🙂 QR', '单片公有文本不是原始明文');
+        const parts = sender.splitPublicText('你好🙂'.repeat(800), 'H');
+        requireCondition(parts.length > 1, '长文本没有拆分');
+        parts.forEach(function(part, index) {
+            requireCondition(part.startsWith(`【QR文本 ${index + 1}/${parts.length}】\n`), '多片序号前缀错误');
+            requireCondition(!/%[0-9A-F]{2}/i.test(part), '公有文本被 percent-encode');
+        });
+    });
+}
+
+async function testSenderFileV2(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender, 'QRSenderTestAPI 尚未实现');
+        const bytes = new TextEncoder().encode('file bytes '.repeat(80));
+        const transfer = await sender.buildFileTransfer(bytes, 'demo.txt', 'text/plain', 'H');
+        requireCondition(/^[0-9a-f]{16}$/.test(transfer.id), '传输 ID 格式错误');
+        requireCondition(transfer.fragments.length > 2, '文件分片不足');
+        transfer.fragments.forEach(function(fragment, index) {
+            requireCondition(fragment.v === 2 && fragment.k === 'f', 'V2 文件信封错误');
+            requireCondition(fragment.x === transfer.id && fragment.i === index, '片号或传输 ID 错误');
+            requireCondition(fragment.t === transfer.fragments.length, '总片数错误');
+        });
+        requireCondition(transfer.fragments[0].m.h.length === 64, '缺少完整 SHA-256');
+    });
+}
+
+async function makeFileTransfers() {
+    const sender = getProductionAPI('sender');
+    requireCondition(sender, 'QRSenderTestAPI 尚未实现');
+    const first = await sender.buildFileTransfer(new TextEncoder().encode('A'.repeat(900)), 'A.bin', 'application/octet-stream', 'H');
+    const second = await sender.buildFileTransfer(new TextEncoder().encode('B'.repeat(900)), 'B.bin', 'application/octet-stream', 'H');
+    return { first, second };
+}
+
+async function testMetadataLateV2(id) {
+    return runProductionTest(id, async function() {
+        const receiver = getProductionAPI('receiver');
+        requireCondition(receiver, 'QRReceiverTestAPI 尚未实现');
+        const transfers = await makeFileTransfers();
+        receiver.reset();
+        receiver.accept(transfers.first.fragments[1]);
+        requireCondition(receiver.snapshot().received.includes(1), '数据片未保存');
+        receiver.accept(transfers.first.fragments[0]);
+        const snapshot = receiver.snapshot();
+        requireCondition(snapshot.received.includes(1), '元数据到达后清空了数据片');
+        requireCondition(snapshot.metadata.n === 'A.bin', '元数据未附加');
+    });
+}
+
+async function testForeignTransferV2(id) {
+    return runProductionTest(id, async function() {
+        const receiver = getProductionAPI('receiver');
+        requireCondition(receiver, 'QRReceiverTestAPI 尚未实现');
+        const transfers = await makeFileTransfers();
+        receiver.reset();
+        receiver.accept(transfers.first.fragments[1]);
+        const result = receiver.accept(transfers.second.fragments[0]);
+        requireCondition(result.accepted === false && result.reason === 'other-transfer', '外来传输未被拒绝');
+        requireCondition(receiver.snapshot().id === transfers.first.id, '活动传输被静默切换');
+    });
+}
+
+async function testInvalidFragmentsV2(id) {
+    return runProductionTest(id, async function() {
+        const receiver = getProductionAPI('receiver');
+        requireCondition(receiver, 'QRReceiverTestAPI 尚未实现');
+        receiver.reset();
+        const invalid = [
+            {v:1,k:'f',x:'0123456789abcdef',i:0,t:2,d:'',m:{}},
+            {v:2,k:'f',x:'bad',i:0,t:2,d:'',m:{}},
+            {v:2,k:'f',x:'0123456789abcdef',i:-1,t:2,d:''},
+            {v:2,k:'f',x:'0123456789abcdef',i:2,t:2,d:''},
+            {v:2,k:'f',x:'0123456789abcdef',i:1.5,t:2,d:''},
+            {v:2,k:'f',x:'0123456789abcdef',i:1,t:2,d:7}
+        ];
+        invalid.forEach(function(fragment) {
+            requireCondition(receiver.accept(fragment).accepted === false, '非法片段被接受');
+        });
+        requireCondition(receiver.snapshot() === null, '非法片段创建了会话');
+    });
+}
+
+async function testSessionRestoreV2(id) {
+    return runProductionTest(id, async function() {
+        const receiver = getProductionAPI('receiver');
+        requireCondition(receiver, 'QRReceiverTestAPI 尚未实现');
+        const transfers = await makeFileTransfers();
+        receiver.reset();
+        receiver.accept(transfers.first.fragments[2]);
+        const saved = receiver.exportSession();
+        receiver.reset();
+        requireCondition(receiver.restore(saved) === true, '合法会话恢复失败');
+        const snapshot = receiver.snapshot();
+        requireCondition(snapshot.metadata === null && snapshot.received.includes(2), '无元数据片段恢复错误');
+    });
+}
+
+async function testRecoveryInjectionV2(id) {
+    return runProductionTest(id, async function() {
+        const receiver = getProductionAPI('receiver');
+        requireCondition(receiver, 'QRReceiverTestAPI 尚未实现');
+        const payload = '<img src=x onerror=alert(1)>.txt';
+        receiver.renderRecoveryName(payload);
+        requireCondition(receiver.recoveryText().includes(payload), '文件名文本未显示');
+        requireCondition(!receiver.recoveryHTML().includes('<img'), '文件名被解析为 HTML');
+    });
+}
+
+async function testDigestMismatchV2(id) {
+    return runProductionTest(id, async function() {
+        const receiver = getProductionAPI('receiver');
+        requireCondition(receiver, 'QRReceiverTestAPI 尚未实现');
+        const transfers = await makeFileTransfers();
+        const damaged = transfers.first.fragments.map(function(fragment) { return JSON.parse(JSON.stringify(fragment)); });
+        damaged[damaged.length - 1].d = damaged[damaged.length - 1].d.replace(/.$/, 'A');
+        receiver.reset();
+        damaged.forEach(function(fragment) { receiver.accept(fragment); });
+        const result = await receiver.verify();
+        requireCondition(result.ok === false && result.reason === 'hash-mismatch', '损坏文件未被 SHA-256 阻断');
+        requireCondition(receiver.snapshot().downloadAllowed === false, '损坏文件启用了下载');
+    });
+}
+
+async function testProductionRoundtripV2(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        const receiver = getProductionAPI('receiver');
+        requireCondition(sender && receiver, '生产测试 API 尚未实现');
+
+        const text = '私有文本🙂'.repeat(120);
+        const textTransfer = await sender.buildPrivateTextTransfer(text, 'H');
+        receiver.reset();
+        textTransfer.fragments.slice(1).reverse().concat(textTransfer.fragments[0]).forEach(function(fragment) { receiver.accept(fragment); });
+        const textResult = await receiver.verify();
+        requireCondition(textResult.ok && textResult.text === text, '私有文本往返失败');
+
+        const bytes = new Uint8Array(2048);
+        crypto.getRandomValues(bytes);
+        const fileTransfer = await sender.buildFileTransfer(bytes, '随机文件.bin', 'application/octet-stream', 'M');
+        receiver.reset();
+        fileTransfer.fragments.slice(1).reverse().concat(fileTransfer.fragments[0]).forEach(function(fragment) { receiver.accept(fragment); });
+        const fileResult = await receiver.verify();
+        requireCondition(fileResult.ok, '文件验证失败');
+        requireCondition(arraysEqual(new Uint8Array(fileResult.bytes), bytes), '文件字节不一致');
+    });
+}
+
+// ============================================================
 // Main test runner
 // ============================================================
 
@@ -10854,7 +11049,7 @@ async function runAllTests() {
     // Use setTimeout to allow UI updates between tests
     async function runNext(i) {
         return new Promise(resolve => {
-            setTimeout(() => {
+            setTimeout(async () => {
                 let ok = false;
                 const fileData1KB = randomBytes(1024);
                 const cnFileName = '微信图片_20260202172938_测试.png';
@@ -10900,6 +11095,33 @@ async function runAllTests() {
                         break;
                     case 'T9':
                         ok = testPartialFileRetransmit('T9');
+                        break;
+                    case 'T10':
+                        ok = await testPublicTextV2('T10');
+                        break;
+                    case 'T11':
+                        ok = await testSenderFileV2('T11');
+                        break;
+                    case 'T12':
+                        ok = await testMetadataLateV2('T12');
+                        break;
+                    case 'T13':
+                        ok = await testForeignTransferV2('T13');
+                        break;
+                    case 'T14':
+                        ok = await testInvalidFragmentsV2('T14');
+                        break;
+                    case 'T15':
+                        ok = await testSessionRestoreV2('T15');
+                        break;
+                    case 'T16':
+                        ok = await testRecoveryInjectionV2('T16');
+                        break;
+                    case 'T17':
+                        ok = await testDigestMismatchV2('T17');
+                        break;
+                    case 'T18':
+                        ok = await testProductionRoundtripV2('T18');
                         break;
                 }
                 if (ok) passed++;
