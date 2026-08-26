@@ -11862,11 +11862,6 @@ function previewReceivedFile() {
     }
 }
 
-window.addEventListener('pagehide', function() {
-    activeFileObjectUrls.forEach(function(objectUrl) { URL.revokeObjectURL(objectUrl); });
-    activeFileObjectUrls.clear();
-});
-
 // Legacy inline handler retained for old bookmarks; V2 uses the reliable path.
 function triggerFileDownload() {
     downloadReceivedFile();
