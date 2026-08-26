@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - `sender.html` and `receiver.html` remain independent self-contained HTML files.
-- Grid QR sizing and fullscreen adaptive sizing remain unchanged.
+- Grid QR sizing remains unchanged; the shared loop/single fullscreen overlay is the sizing target.
 - Loop and single modes share one 160–360px value, step 20px, default 220px.
 - File operations never clear the verified transfer session automatically.
 - Direct-download Object URLs remain alive for at least 60 seconds.
@@ -97,7 +97,7 @@ git commit -m "test: add QR size and mobile file action regressions"
 
 - [ ] **Step 1: Add the display-size control UI**
 
-Insert below the mode selector:
+Insert inside `#singleQRContainer`, above the loop/single navigation controls:
 
 ```html
 <div id="qrSizeControl" class="qr-size-control" hidden>
@@ -108,7 +108,7 @@ Insert below the mode selector:
 
 - [ ] **Step 2: Replace loop scaling with CSS sizing**
 
-Remove `.loop-mode .qr-item { transform: scale(1.5); }`. Apply `--display-qr-size: 220px` only to the first QR content child in loop/single modes, with `max-width` and `max-height` capped by the viewport. Make nested canvas/img/svg fill the sized box while labels remain unscaled.
+Remove `.loop-mode .qr-item { transform: scale(1.5); }`. Apply `--display-qr-size: 220px` to `#singleQRContent` and its QR canvas/img/svg, with width and height capped by both viewport axes. Keep the slider visible in the fullscreen overlay for loop/single; labels and controls remain unscaled.
 
 - [ ] **Step 3: Implement normalized persisted state**
 
@@ -124,7 +124,7 @@ function normalizeDisplayQRSize(value) {
 }
 ```
 
-`setDisplayQRSize` updates the CSS property, slider, output and LocalStorage. Initialization loads and validates the stored value. `setMode` shows the control for loop/single only.
+`setDisplayQRSize` updates the CSS property, slider, output and LocalStorage. Initialization loads and validates the stored value. Loop/single overlay entry shows the control; grid/overlay exit hides it.
 
 - [ ] **Step 4: Extend `QRSenderTestAPI`**
 
@@ -232,7 +232,7 @@ Expected: identical pass totals twice; every icon green; no current-page console
 
 - [ ] **Step 3: Exercise production UI**
 
-Verify the slider changes loop/single QR boxes without regenerating payloads, grid/fullscreen remain unchanged, a completed PDF shows all applicable actions, a ZIP hides preview, and file actions preserve the active session.
+Verify the slider changes the shared loop/single fullscreen QR without regenerating payloads, grid remains unchanged, a completed PDF shows all applicable actions, a ZIP hides preview, and file actions preserve the active session.
 
 - [ ] **Step 4: Run static gates**
 
