@@ -486,6 +486,126 @@ function validateTextLength(text, errorLevel) {
     };
 }
 
+// ===== QR Transfer V2 core (self-contained) =====
+const PUBLIC_QR_CAPACITY = { L: 2953, M: 2331, Q: 1663, H: 1273 };
+const PRIVATE_QR_V10_CAPACITY = { L: 271, M: 213, Q: 151, H: 119 };
+
+function utf8Bytes(value) {
+    return new TextEncoder().encode(value);
+}
+
+function utf8ByteLength(value) {
+    return utf8Bytes(value).length;
+}
+
+async function sha256Hex(bytes) {
+    const normalized = new Uint8Array(bytes);
+    const digest = await crypto.subtle.digest('SHA-256', normalized);
+    return Array.from(new Uint8Array(digest), function(byte) {
+        return byte.toString(16).padStart(2, '0');
+    }).join('');
+}
+
+function bytesToBase64(bytes) {
+    const normalized = new Uint8Array(bytes);
+    let binary = '';
+    for (let offset = 0; offset < normalized.length; offset += 0x8000) {
+        binary += String.fromCharCode.apply(null, normalized.subarray(offset, offset + 0x8000));
+    }
+    return btoa(binary);
+}
+
+function splitUtf8Text(text, byteBudget) {
+    if (byteBudget < 1) throw new Error('二维码文本容量不足');
+    const parts = [];
+    let current = '';
+    let currentBytes = 0;
+    for (const codePoint of text) {
+        const pointBytes = utf8ByteLength(codePoint);
+        if (pointBytes > byteBudget) throw new Error('单个字符超过二维码容量');
+        if (current && currentBytes + pointBytes > byteBudget) {
+            parts.push(current);
+            current = '';
+            currentBytes = 0;
+        }
+        current += codePoint;
+        currentBytes += pointBytes;
+    }
+    if (current || parts.length === 0) parts.push(current);
+    return parts;
+}
+
+function splitPublicText(text, errorLevel) {
+    const capacity = PUBLIC_QR_CAPACITY[errorLevel] || PUBLIC_QR_CAPACITY.H;
+    if (utf8ByteLength(text) <= capacity) return [text];
+
+    // Reserve enough room for the readable sequence prefix. Recalculate until
+    // the final prefix and every Unicode-safe text part fit the QR capacity.
+    let payloadBudget = capacity - 64;
+    while (payloadBudget > 0) {
+        const rawParts = splitUtf8Text(text, payloadBudget);
+        const total = rawParts.length;
+        const result = rawParts.map(function(part, index) {
+            return `【QR文本 ${index + 1}/${total}】\n${part}`;
+        });
+        if (result.every(function(part) { return utf8ByteLength(part) <= capacity; })) {
+            return result;
+        }
+        payloadBudget -= 16;
+    }
+    throw new Error('文本无法按当前纠错级别拆分');
+}
+
+function buildV2Fragments(kind, transferId, base64Data, metadata, errorLevel) {
+    const capacity = PRIVATE_QR_V10_CAPACITY[errorLevel] || PRIVATE_QR_V10_CAPACITY.H;
+    const maximumChunk = Math.max(8, capacity - 48);
+
+    for (let chunkSize = maximumChunk; chunkSize >= 8; chunkSize--) {
+        const chunks = [];
+        if (base64Data.length === 0) {
+            chunks.push('');
+        } else {
+            for (let offset = 0; offset < base64Data.length; offset += chunkSize) {
+                chunks.push(base64Data.slice(offset, offset + chunkSize));
+            }
+        }
+        const total = chunks.length + 1;
+        const fragments = [{ v: 2, k: kind, x: transferId, i: 0, t: total, d: '', m: metadata }];
+        chunks.forEach(function(chunk, index) {
+            fragments.push({ v: 2, k: kind, x: transferId, i: index + 1, t: total, d: chunk });
+        });
+        const dataFits = fragments.slice(1).every(function(fragment) {
+            return utf8ByteLength(JSON.stringify(fragment)) <= capacity;
+        });
+        if (dataFits) return fragments;
+    }
+    throw new Error('V2 分片无法装入目标二维码容量');
+}
+
+async function buildPrivateTextTransfer(text, errorLevel) {
+    const bytes = utf8Bytes(text);
+    const contentHash = await sha256Hex(bytes);
+    const id = contentHash.slice(0, 16);
+    const fragments = buildV2Fragments('t', id, bytesToBase64(bytes), { h: contentHash, e: 'utf8' }, errorLevel);
+    return { id: id, hash: contentHash, fragments: fragments };
+}
+
+async function buildFileTransfer(bytes, fileName, mimeType, errorLevel) {
+    const normalized = new Uint8Array(bytes);
+    const contentHash = await sha256Hex(normalized);
+    const descriptor = `${fileName}\u0000${normalized.length}\u0000${contentHash}`;
+    const idHash = await sha256Hex(utf8Bytes(descriptor));
+    const id = idHash.slice(0, 16);
+    const metadata = {
+        n: fileName,
+        y: mimeType || 'application/octet-stream',
+        s: normalized.length,
+        h: contentHash
+    };
+    const fragments = buildV2Fragments('f', id, bytesToBase64(normalized), metadata, errorLevel);
+    return { id: id, hash: contentHash, fragments: fragments };
+}
+
 // Warning/Error Display Utilities (T006)
 function showWarning(message) {
     const messageDiv = document.getElementById('messageArea');
@@ -740,7 +860,7 @@ function formatBytes(bytes) {
 }
 
 // Generate File QR Codes (T037)
-function generateFileQR() {
+async function generateFileQR() {
     if (!currentFile) {
         showError('请先选择文件');
         return;
@@ -755,27 +875,14 @@ function generateFileQR() {
     // Use FileReader to read file as Base64
     const reader = new FileReader();
 
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         try {
-            const base64Data = e.target.result; // data:image/png;base64,xxxxx
-            console.log(`文件读取完成，Base64长度: ${base64Data.length}`);
-
-            // FIX: Remove data URL prefix BEFORE calculating checksum
-            // This ensures checksum matches receiver's reassembled data (which is pure base64)
-            const pureBase64 = base64Data.replace(/^data:[^;]+;base64,/, '');
-
-            // Calculate checksum on PURE Base64 (T039)
-            const checksum = calculateSimpleChecksum(pureBase64);
-            console.log(`校验和: ${checksum}`);
-
-            // Chunk file (T038)
-            // Note: We pass pureBase64 directly now, so chunkFile function needs to handle it
-            const fragments = chunkFile(currentFile, pureBase64, checksum);
-            console.log(`文件已分片: ${fragments.length} 片`);
-            console.log(`第1片数据大小: ${fragments[0].data.length} 字节 (含元数据)`);
-
-            // Generate QR codes for each fragment using existing private mode logic
-            generatePrivateQRCodes(fragments);
+            const bytes = new Uint8Array(e.target.result);
+            console.log(`文件读取完成: ${bytes.length} 字节`);
+            const errorLevel = document.getElementById('errorLevel').value;
+            const transfer = await buildFileTransfer(bytes, currentFile.name, currentFile.type, errorLevel);
+            console.log(`V2 文件已分片: ${transfer.fragments.length} 片, ID=${transfer.id}`);
+            generatePrivateQRCodes(transfer.fragments);
 
         } catch (error) {
             showError('文件处理失败: ' + error.message);
@@ -788,8 +895,8 @@ function generateFileQR() {
         console.error('FileReader error');
     };
 
-    // Read file as Data URL (includes MIME type and base64)
-    reader.readAsDataURL(currentFile);
+    // Read raw bytes so SHA-256 covers the exact original file.
+    reader.readAsArrayBuffer(currentFile);
 }
 
 // Chunk File (T038)
@@ -861,12 +968,11 @@ function generatePrivateQRCodes(fragments) {
         container.appendChild(qrDiv);
 
         const label = document.createElement('div');
-        const typeLabel = fragment.type === 'file' ? '文件' : '文本';
+        const typeLabel = fragment.k === 'f' ? '文件' : '文本';
         label.textContent = `${typeLabel} - 第 ${index + 1} / ${fragments.length} 片`;
-        // Support both old (metadata) and new (meta) formats
-        const meta = fragment.meta || fragment.metadata;
-        if (fragment.type === 'file' && meta) {
-            const fileName = meta.n || meta.fileName;
+        const meta = fragment.m;
+        if (fragment.k === 'f' && meta) {
+            const fileName = meta.n;
             label.textContent += `\n📄 ${fileName}`;
         }
         label.style.whiteSpace = 'pre-line';
@@ -894,7 +1000,7 @@ function generatePrivateQRCodes(fragments) {
             console.error(`生成第${index + 1}片QR码失败:`, error);
             console.error(`失败片段JSON长度: ${qrData.length} 字节`);
             if (index === 0) {
-                console.error(`第1片包含元数据:`, fragment.meta || fragment.metadata);
+                console.error(`第1片包含元数据:`, fragment.m);
             }
             // 显示错误信息
             qrDiv.innerHTML = `<div style="color:var(--error); padding:10px; border:1px solid var(--error); border-radius:12px;">
@@ -925,42 +1031,12 @@ function generatePrivateQRCodes(fragments) {
 // Universal QR Generation (T012)
 function generateUniversalQR(text) {
     const errorLevel = document.getElementById('universalErrorLevel').value;
-
-    // Validate text length (T014)
-    const validation = validateTextLength(text, errorLevel);
-    if (!validation.valid) {
-        showError(`文本过长(${validation.byteLength}字节)，当前容量上限${validation.maxCapacity}字节。建议使用私有模式或降低纠错级别。`);
-        return false;
-    }
-
-    // Check for special characters and encode if needed (T015)
-    const encodingResult = encodeForUniversalQR(text);
-
     const display = document.getElementById('qrDisplay');
     display.innerHTML = '';
+    qrCodes = [];
+    qrCache = {};
+    retransmitIndices = null;
     clearMessages();
-
-    if (encodingResult.needsWarning) {
-        showWarning(encodingResult.warningMessage);
-    }
-
-    // Create QR code container
-    const container = document.createElement('div');
-    container.className = 'qr-item';
-
-    const qrDiv = document.createElement('div');
-    container.appendChild(qrDiv);
-
-    const label = document.createElement('div');
-    label.textContent = '通用二维码 - 可用第三方扫描器扫描';
-    label.style.marginTop = '10px';
-    label.style.fontWeight = 'bold';
-    label.style.color = 'var(--success)';
-    container.appendChild(label);
-
-    display.appendChild(container);
-
-    // Generate QR code with plain text (no JSON wrapper)
     const correctLevelMap = {
         'L': QRCode.CorrectLevel.L,
         'M': QRCode.CorrectLevel.M,
@@ -969,20 +1045,33 @@ function generateUniversalQR(text) {
     };
 
     try {
-        new QRCode(qrDiv, {
-            text: encodingResult.encoded,
-            width: 300,
-            height: 300,
-            colorDark: '#000000',
-            colorLight: '#ffffff',
-            correctLevel: correctLevelMap[errorLevel]
+        const parts = splitPublicText(text, errorLevel);
+        parts.forEach(function(part, index) {
+            const container = document.createElement('div');
+            container.className = 'qr-item';
+            const qrDiv = document.createElement('div');
+            container.appendChild(qrDiv);
+            const label = document.createElement('div');
+            label.textContent = parts.length === 1
+                ? '公有文本 - 任意扫描器可直接读取'
+                : `公有文本 - 第 ${index + 1} / ${parts.length} 片`;
+            label.style.marginTop = '10px';
+            label.style.fontWeight = 'bold';
+            label.style.color = 'var(--success)';
+            container.appendChild(label);
+            display.appendChild(container);
+            new QRCode(qrDiv, {
+                text: part,
+                width: 300,
+                height: 300,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: correctLevelMap[errorLevel]
+            });
+            qrCodes.push({ element: container, data: part });
         });
-
-        console.log(`通用QR码生成成功: ${validation.byteLength}/${validation.maxCapacity} 字节`);
-        if (encodingResult.needsWarning) {
-            console.log(`文本已编码: ${encodingResult.warningMessage}`);
-        }
-
+        resetLoopRange();
+        console.log(`公有文本QR生成成功: ${parts.length}片，保持UTF-8明文`);
         showDisplaySections();
         return true;
     } catch (error) {
@@ -994,11 +1083,11 @@ function generateUniversalQR(text) {
 
 // ===== 应用主要功能 =====
 
-function generateQR() {
+async function generateQR() {
     // 智能判断：如果私有模式且有文件，生成文件QR；否则生成文本QR
     if (isModePrivate() && currentFile) {
         // 优先生成文件QR
-        generateFileQR();
+        await generateFileQR();
         return;
     }
 
@@ -1015,131 +1104,21 @@ function generateQR() {
         return;
     }
 
-    // Otherwise, use existing private mode logic
-    const display = document.getElementById('qrDisplay');
-    display.innerHTML = '';
-    qrCodes = []; qrCache = {}; // 重置QR码数组和缓存
-    
-    // 获取用户选择的选项
     const errorLevel = document.getElementById('errorLevel').value;
-    const chunkStrategy = document.getElementById('chunkStrategy').value;
     loopSpeed = parseInt(document.getElementById('loopSpeed').value);
-    
-    // 根据策略确定分片大小
-    let chunkSize = 15; // 默认分片大小
-    switch(chunkStrategy) {
-        case 'small':
-            chunkSize = 15;
-            break;
-        case 'medium':
-            chunkSize = 30;
-            break;
-        case 'large':
-            chunkSize = 50;
-            break;
-        case 'xlarge':
-            chunkSize = 80;
-            break;
-        case 'auto':
-        default:
-            // 智能分片：根据文本长度动态调整分片大小
-            if (text.length > 1000) {
-                chunkSize = Math.min(50, Math.max(25, Math.floor(text.length / 25))); // 长文本使用更大分片，最多25片
-                console.log(`长文本优化：文本${text.length}字符，使用分片大小${chunkSize}，预计${Math.ceil(text.length / chunkSize)}片`);
-            } else if (text.length > 500) {
-                chunkSize = 25; // 中等文本使用25字符分片
-            }
-            break;
-    }
-    
-    console.log(`分片策略: ${chunkStrategy}, 纠错级别: ${errorLevel}, 分片大小: ${chunkSize}`);
-    
-    const chunks = chunkText(text, chunkSize);
-    
-    // 如果分片数量过多，提示用户
-    if (chunks.length > 30) {
-        const proceed = confirm(`文本较长，将生成${chunks.length}个QR码。建议缩短文本或继续？`);
-        if (!proceed) return;
-    }
-    
-    chunks.forEach((chunk, index) => {
-        const container = document.createElement('div');
-        container.className = 'qr-item';
-        
-        const qrDiv = document.createElement('div');
-        container.appendChild(qrDiv);
-        
-        const label = document.createElement('div');
-        label.textContent = `第 ${index + 1} / ${chunks.length} 片`;
-        container.appendChild(label);
-        
-        display.appendChild(container);
-        
-        // 使用Base64编码处理中文
-        const encodedChunk = btoa(unescape(encodeURIComponent(chunk)));
-        const qrData = JSON.stringify({
-            i: index + 1, 
-            t: chunks.length, 
-            d: encodedChunk,
-            e: 'b64' // 标记为Base64编码
-        });
-        
-        // 调试：输出实际数据长度
-        console.log(`片${index + 1}: 原始长度=${chunk.length}, Base64长度=${encodedChunk.length}, JSON长度=${qrData.length}`);
-        
-        try {
-            // 更严格的数据长度检查，防止溢出
-            if (qrData.length > 400) {
-                console.error(`片${index + 1}数据严重超长(${qrData.length}字符)，跳过生成`);
-                throw new Error(`数据长度${qrData.length}超过安全限制`);
-            }
-            if (qrData.length > 250) {
-                console.warn(`片${index + 1}数据过长(${qrData.length}字符)，强制使用L级纠错`);
-            }
-            
-            // 根据显示模式设置QR码大小
-            const qrSize = mode === 'loop' ? 300 : 200;
-            
-            // 根据用户选择的纠错级别设置
-            const correctLevelMap = {
-                'L': QRCode.CorrectLevel.L,
-                'M': QRCode.CorrectLevel.M,
-                'Q': QRCode.CorrectLevel.Q,
-                'H': QRCode.CorrectLevel.H
-            };
-            
-            new QRCode(qrDiv, {
-                text: qrData,
-                width: qrSize,
-                height: qrSize,
-                correctLevel: correctLevelMap[errorLevel] || QRCode.CorrectLevel.L
-            });
-        } catch (e) {
-            console.error('QR生成失败:', e);
-            console.error('失败的数据长度:', qrData.length);
-            console.error('失败的数据内容:', qrData);
-            qrDiv.innerHTML = '<div style="color:var(--error);">QR码生成失败，数据过长</div>';
+    clearMessages();
+    try {
+        const transfer = await buildPrivateTextTransfer(text, errorLevel);
+        if (transfer.fragments.length > 30) {
+            const proceed = confirm(`文本较长，将生成${transfer.fragments.length}个QR码。建议缩短文本或继续？`);
+            if (!proceed) return;
         }
-
-        // 统一格式：与文件QR生成保持一致
-        qrCodes.push({ element: container, data: qrData });
-    });
-    
-    // 初始化循环范围控制
-    loopStart = 1;
-    loopEnd = chunks.length;
-    document.getElementById('loopStart').value = loopStart;
-    document.getElementById('loopEnd').value = loopEnd;
-    
-    // 如果当前是单张模式，更新选择器
-    if (mode === 'single') {
-        updateSingleModeSelector();
-        showQRCode(0);
-        currentIndex = 0;
-        updateQRIndex();
+        console.log(`V2 私有文本: ${transfer.fragments.length}片, ID=${transfer.id}`);
+        generatePrivateQRCodes(transfer.fragments);
+    } catch (error) {
+        showError('私有文本处理失败: ' + error.message);
+        console.error('Private text V2 generation failed:', error);
     }
-
-    showDisplaySections();
 }
 
 function chunkText(text, maxSize) {
@@ -1180,6 +1159,15 @@ function chunkText(text, maxSize) {
     
     console.log(`分片策略：原始${maxSize} → 实际${effectiveSize}字符/片，共${chunks.length}片`);
     return chunks;
+}
+
+if (new URLSearchParams(window.location.search).get('test') === '1') {
+    window.QRSenderTestAPI = Object.freeze({
+        splitPublicText: splitPublicText,
+        buildPrivateTextTransfer: buildPrivateTextTransfer,
+        buildFileTransfer: buildFileTransfer,
+        sha256Hex: sha256Hex
+    });
 }
 
 function setMode(newMode) {
