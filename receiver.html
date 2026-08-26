@@ -10815,6 +10815,24 @@ function deleteLargeFragments(id,dbName) { return openLargeFragmentDB(dbName).th
 function bitsetToBase64(bits){let s='';for(let i=0;i<bits.length;i+=0x8000)s+=String.fromCharCode.apply(null,bits.subarray(i,i+0x8000));return btoa(s);}
 function base64ToBitset(value){const s=atob(value);const bits=new Uint8Array(s.length);for(let i=0;i<s.length;i++)bits[i]=s.charCodeAt(i);return bits;}
 
+async function reconcileLargeTransferFromDB() {
+    if (!activeTransfer || activeTransfer.storageMode !== 'idb') return;
+    await flushLargeFragmentWrites();
+    const rows = await getLargeFragments(activeTransfer.id);
+    activeTransfer.receivedBits = createReceivedBits(activeTransfer.total);
+    activeTransfer.receivedCount = 0;
+    activeTransfer.progressBuckets = new Uint32Array(Math.min(activeTransfer.total,200));
+    rows.forEach(function(row){
+        if(row.index<0||row.index>=activeTransfer.total)return;
+        if(markReceivedBit(activeTransfer.receivedBits,row.index)){
+            activeTransfer.receivedCount++;
+            const bucket=Math.min(activeTransfer.progressBuckets.length-1,Math.floor(row.index*activeTransfer.progressBuckets.length/activeTransfer.total));
+            activeTransfer.progressBuckets[bucket]++;
+        }
+    });
+    saveV2Session();
+}
+
 function isSha256(value) {
     return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 }
@@ -11754,13 +11772,17 @@ function showRecoveryBanner(session) {
 }
 
 // 继续会话（用户点击"继续传输"）
-function continueSession() {
+async function continueSession() {
     const banner = document.getElementById('recovery-banner');
     banner.style.display = 'none';
     document.body.classList.remove('has-recovery-banner');
 
     hasReceivedFirstFragment = true;
     if (activeTransfer) {
+        if (activeTransfer.storageMode === 'idb') {
+            try { await reconcileLargeTransferFromDB(); }
+            catch(error) { updateScanProgress('❌ 无法恢复大文件片段存储',0,activeTransfer.total); return; }
+        }
         const receivedCount = activeTransfer.receivedCount;
         const total = activeTransfer.total;
         updateV2ProgressMap(activeTransfer, -1);
