@@ -58,14 +58,17 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3
 .qr-display { background: var(--bg-input); padding: 24px; border-radius: 16px; min-height: 300px; }
 .qr-display.grid-mode { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 .qr-display.loop-mode { display: flex; justify-content: center; align-items: center; min-height: 400px; }
-.qr-display.loop-mode .qr-item { transform: scale(1.5); }
 .qr-display.single-mode { display: flex; justify-content: center; align-items: center; min-height: 400px; }
 .qr-display.single-mode .qr-item { transform: none; box-shadow: none; background: transparent; }
 .qr-item { background: #fff; padding: 15px; border-radius: 12px; text-align: center; color: #333; }
 /* Fullscreen Single Mode */
 #singleQRContainer { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 1000; flex-direction: column; justify-content: center; align-items: center; padding: 20px; }
-#singleQRContent { background: #fff; padding: 20px; border-radius: 16px; display: flex; justify-content: center; align-items: center; max-width: 90vw; max-height: 80vh; }
-#singleQRContent img { max-width: 100%; max-height: 100%; object-fit: contain; }
+#singleQRContent { --display-qr-size:220px; width:min(var(--display-qr-size), calc(100vw - 80px), calc(100vh - 250px)); height:min(var(--display-qr-size), calc(100vw - 80px), calc(100vh - 250px)); background:#fff; padding:10px; border-radius:16px; display:flex; justify-content:center; align-items:center; flex:0 0 auto; }
+#singleQRContent canvas, #singleQRContent img, #singleQRContent svg { width:100% !important; height:100% !important; max-width:100%; max-height:100%; object-fit:contain; display:block; }
+.qr-size-control { width:min(360px, calc(100vw - 40px)); margin-top:14px; padding:10px 14px; background:var(--bg-card); border:1px solid var(--border); border-radius:12px; }
+.qr-size-control label { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; color:var(--text-secondary); font-size:13px; }
+.qr-size-control output { color:var(--text-primary); font-variant-numeric:tabular-nums; font-weight:600; }
+.qr-size-control input[type="range"] { width:100%; accent-color:var(--accent); }
 #singleQRControls { margin-top: 20px; display: flex; gap: 15px; align-items: center; background: var(--bg-card); padding: 10px 20px; border-radius: 980px; }
 #singleQRControls button { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border); }
 #singleQRControls button:hover { background: var(--bg-card-hover); }
@@ -311,6 +314,10 @@ details summary:hover { color: var(--text-primary); }
     <button class="close-single-mode" onclick="exitSingleMode()">×</button>
     <div id="singleQRInfo">第 1 / X 张</div>
     <div id="singleQRContent"></div>
+    <div id="qrSizeControl" class="qr-size-control" hidden>
+        <label><span data-zh="二维码尺寸" data-en="QR Size">二维码尺寸</span><output id="qrSizeValue">220px</output></label>
+        <input id="qrSizeSlider" type="range" min="160" max="360" step="20" value="220" oninput="setDisplayQRSize(this.value)">
+    </div>
     <div id="singleQRControls">
         <button class="btn" onclick="previousQR()" style="padding: 10px 20px;">⬅️ 上一张</button>
         <input type="number" id="pageNumberInput" min="1" value="1" onchange="jumpToPage()" onkeydown="if(event.key==='Enter'){jumpToPage();event.preventDefault();}" style="width:60px; text-align:center; padding:6px; border:1px solid var(--border); border-radius:8px; background:var(--bg-input); color:var(--text-primary); font-size:14px; font-weight:600;">
@@ -335,6 +342,43 @@ let loopInterval = null;
 let loopSpeed = 100;
 let qrCache = {}; // { index: innerHTML } for fullscreen QR cache
 let textProtocolMode = 'universal';
+const DISPLAY_QR_SIZE_KEY = 'qr_display_size';
+const DISPLAY_QR_SIZE_DEFAULT = 220;
+let displayQRSize = DISPLAY_QR_SIZE_DEFAULT;
+
+function normalizeDisplayQRSize(value) {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return DISPLAY_QR_SIZE_DEFAULT;
+    const clamped = Math.min(360, Math.max(160, numericValue));
+    return Math.round(clamped / 20) * 20;
+}
+
+function setDisplayQRSize(value) {
+    displayQRSize = normalizeDisplayQRSize(value);
+    const content = document.getElementById('singleQRContent');
+    const slider = document.getElementById('qrSizeSlider');
+    const output = document.getElementById('qrSizeValue');
+    if (content) content.style.setProperty('--display-qr-size', displayQRSize + 'px');
+    if (slider) slider.value = String(displayQRSize);
+    if (output) output.textContent = displayQRSize + 'px';
+    try { localStorage.setItem(DISPLAY_QR_SIZE_KEY, String(displayQRSize)); } catch (error) {}
+    return displayQRSize;
+}
+
+function initializeDisplayQRSize() {
+    let storedValue = null;
+    try { storedValue = localStorage.getItem(DISPLAY_QR_SIZE_KEY); } catch (error) {}
+    setDisplayQRSize(storedValue === null ? DISPLAY_QR_SIZE_DEFAULT : storedValue);
+}
+
+function setQRSizeControlVisible(visible) {
+    const control = document.getElementById('qrSizeControl');
+    if (control) control.hidden = !visible;
+}
+
+function getDisplayQRSize() {
+    return displayQRSize;
+}
 
 function setTextProtocolMode(selectedMode) {
     if (selectedMode !== 'universal' && selectedMode !== 'private') return false;
@@ -1194,6 +1238,33 @@ if (new URLSearchParams(window.location.search).get('test') === '1') {
             const primaryVisible = window.getComputedStyle(document.getElementById('optgroup-error')).display !== 'none';
             const legacyVisible = window.getComputedStyle(document.getElementById('error-level-container')).display !== 'none';
             return (primaryVisible ? 1 : 0) + (legacyVisible ? 1 : 0);
+        },
+        normalizeDisplayQRSize: normalizeDisplayQRSize,
+        setDisplayQRSize: setDisplayQRSize,
+        getDisplayQRSize: getDisplayQRSize,
+        getPersistedDisplayQRSize: function() { return localStorage.getItem(DISPLAY_QR_SIZE_KEY); },
+        resetDisplayQRSizeForTest: function() {
+            try { localStorage.removeItem(DISPLAY_QR_SIZE_KEY); } catch (error) {}
+            return setDisplayQRSize(DISPLAY_QR_SIZE_DEFAULT);
+        },
+        getSizeControlState: function(requestedMode) {
+            setMode(requestedMode);
+            const control = document.getElementById('qrSizeControl');
+            return { visible: control ? !control.hidden : false, size: displayQRSize };
+        },
+        loopUsesTransformScale: function() {
+            for (const sheet of Array.from(document.styleSheets)) {
+                try {
+                    for (const rule of Array.from(sheet.cssRules || [])) {
+                        if (rule.selectorText && rule.selectorText.includes('.loop-mode .qr-item') && (rule.style.transform || '').includes('scale')) return true;
+                    }
+                } catch (error) {}
+            }
+            return false;
+        },
+        fullscreenUsesDisplaySize: function() {
+            const content = document.getElementById('singleQRContent');
+            return !!content && content.style.getPropertyValue('--display-qr-size') === displayQRSize + 'px';
         }
     });
 }
@@ -1222,12 +1293,14 @@ function setMode(newMode) {
 
     // 设置显示类名
     if (mode === 'grid') {
+        setQRSizeControlVisible(false);
         display.className = 'qr-display grid-mode';
         singleControls.style.display = 'none';
         loopControls.style.display = 'none';
         stopLoop();
         showAllQRCodes();
     } else if (mode === 'loop') {
+        setQRSizeControlVisible(true);
         display.className = 'qr-display loop-mode';
         singleControls.style.display = 'none';
         loopControls.style.display = 'block';
@@ -1270,6 +1343,7 @@ function setMode(newMode) {
 function enterSingleMode() {
     const container = document.getElementById('singleQRContainer');
     if (container) {
+        setQRSizeControlVisible(true);
         container.style.display = 'flex';
         // Show single controls, hide loop controls
         const singleCtrl = document.getElementById('singleQRControls');
@@ -1287,6 +1361,7 @@ function enterSingleMode() {
 function exitSingleMode() {
     const container = document.getElementById('singleQRContainer');
     if (container) {
+        setQRSizeControlVisible(false);
         container.style.display = 'none';
         document.removeEventListener('keydown', handleSingleModeKeys);
 
@@ -1723,6 +1798,8 @@ function updateLoopDisplay() {
 
     applyLang(lang);
 })();
+
+document.addEventListener('DOMContentLoaded', initializeDisplayQRSize);
 </script>
 <div style="text-align:center; padding:20px 0 12px; font-size:11px; color:var(--text-muted);">
     <span data-zh="最后更新" data-en="Last updated">最后更新</span>: <span id="buildTime"></span>
