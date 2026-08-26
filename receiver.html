@@ -10995,7 +10995,7 @@ async function finalizeV2Transfer() {
         document.getElementById('copyBtn').style.display = 'block';
         clearSession();
     } else {
-        document.getElementById('fileProgress').textContent = '✅ 文件接收完成并通过 SHA-256 校验！';
+        document.getElementById('fileProgressText').textContent = activeTransfer.total + ' / ' + activeTransfer.total + ' · SHA-256 ✓';
         document.getElementById('downloadBtn').disabled = false;
     }
     updateScanProgress('✅ 扫描与校验完成！', activeTransfer.total, activeTransfer.total);

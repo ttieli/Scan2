@@ -99,8 +99,8 @@
     </div>
 
     <div id="qrWorkspace"></div>
-    <iframe id="senderTestFrame" src="sender.html?test=1&amp;v=8" hidden></iframe>
-    <iframe id="receiverTestFrame" src="receiver.html?test=1&amp;v=8" hidden></iframe>
+    <iframe id="senderTestFrame" src="sender.html?test=1&amp;v=9" hidden></iframe>
+    <iframe id="receiverTestFrame" src="receiver.html?test=1&amp;v=9" hidden></iframe>
 
 <script>
 // 内嵌 qrcode.min.js
@@ -10860,6 +10860,7 @@ async function runProductionTest(id, body) {
         return true;
     } catch (error) {
         const message = error && error.message ? error.message : String(error);
+        console.error(`[${id}] production regression failed`, error);
         log(`[${id}] ❌ ${message}`, 'err');
         setTestResult(id, false, message);
         return false;
