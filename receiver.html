@@ -10559,6 +10559,7 @@ function resetToReady() {
 
     // Clear all state
     clearSession();
+    resetV2State();
     currentSession = null;
     chunks = {};
     totalChunks = 0;
@@ -10753,6 +10754,301 @@ function updateScanProgress(message, received, total) {
     } else if (received > 0) {
         statusEl.className = 'progress-indicator';
     }
+}
+
+// ===== QR Transfer V2 core =====
+let activeTransfer = null;
+let v2VerifiedResult = null;
+let v2VerificationInProgress = false;
+const V2_SESSION_KEY = 'qr_transfer_session';
+
+function isSha256(value) {
+    return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+}
+
+function isValidV2Metadata(kind, metadata) {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || !isSha256(metadata.h)) return false;
+    if (kind === 't') return metadata.e === 'utf8';
+    return typeof metadata.n === 'string' && metadata.n.length > 0 &&
+        typeof metadata.y === 'string' &&
+        Number.isInteger(metadata.s) && metadata.s >= 0;
+}
+
+function validateV2Fragment(value) {
+    if (!value || typeof value !== 'object' || value.v !== 2 || (value.k !== 't' && value.k !== 'f')) {
+        return { ok: false, reason: 'version-or-kind' };
+    }
+    if (typeof value.x !== 'string' || !/^[0-9a-f]{16}$/.test(value.x)) {
+        return { ok: false, reason: 'transfer-id' };
+    }
+    if (!Number.isInteger(value.i) || !Number.isInteger(value.t) || value.t < 2 || value.i < 0 || value.i >= value.t) {
+        return { ok: false, reason: 'index' };
+    }
+    if (typeof value.d !== 'string') return { ok: false, reason: 'data' };
+    if (value.i === 0) {
+        if (value.d !== '' || !isValidV2Metadata(value.k, value.m)) return { ok: false, reason: 'metadata' };
+    } else if (value.m !== undefined) {
+        return { ok: false, reason: 'unexpected-metadata' };
+    }
+    return { ok: true };
+}
+
+function createV2State(fragment) {
+    const now = Date.now();
+    return {
+        version: 2,
+        id: fragment.x,
+        kind: fragment.k,
+        total: fragment.t,
+        fragments: {},
+        metadata: null,
+        createdAt: now,
+        updatedAt: now,
+        status: 'receiving',
+        downloadAllowed: false
+    };
+}
+
+function saveV2Session() {
+    if (!activeTransfer) return;
+    try {
+        localStorage.setItem(V2_SESSION_KEY, JSON.stringify(activeTransfer));
+    } catch (error) {
+        console.error('保存V2会话失败:', error);
+        const statusEl = document.getElementById('scanProgress');
+        if (statusEl) statusEl.textContent = '⚠️ 存储空间不足，无法保存恢复进度（扫描仍可继续）';
+    }
+}
+
+function acceptV2Fragment(fragment) {
+    const validation = validateV2Fragment(fragment);
+    if (!validation.ok) return { accepted: false, reason: validation.reason };
+
+    if (!activeTransfer) activeTransfer = createV2State(fragment);
+    if (activeTransfer.id !== fragment.x || activeTransfer.kind !== fragment.k || activeTransfer.total !== fragment.t) {
+        return { accepted: false, reason: 'other-transfer' };
+    }
+
+    const duplicate = Object.prototype.hasOwnProperty.call(activeTransfer.fragments, fragment.i);
+    activeTransfer.fragments[fragment.i] = fragment.d;
+    if (fragment.i === 0) activeTransfer.metadata = JSON.parse(JSON.stringify(fragment.m));
+    activeTransfer.updatedAt = Date.now();
+    activeTransfer.status = 'receiving';
+    activeTransfer.downloadAllowed = false;
+    v2VerifiedResult = null;
+    saveV2Session();
+    return { accepted: true, duplicate: duplicate };
+}
+
+function snapshotV2State() {
+    if (!activeTransfer) return null;
+    return {
+        version: activeTransfer.version,
+        id: activeTransfer.id,
+        kind: activeTransfer.kind,
+        total: activeTransfer.total,
+        received: Object.keys(activeTransfer.fragments).map(Number).sort(function(a, b) { return a - b; }),
+        metadata: activeTransfer.metadata ? JSON.parse(JSON.stringify(activeTransfer.metadata)) : null,
+        status: activeTransfer.status,
+        downloadAllowed: activeTransfer.downloadAllowed
+    };
+}
+
+function exportV2Session() {
+    return activeTransfer ? JSON.stringify(activeTransfer) : null;
+}
+
+function validateStoredV2Session(session) {
+    if (!session || session.version !== 2 || !/^[0-9a-f]{16}$/.test(session.id || '') ||
+        (session.kind !== 't' && session.kind !== 'f') || !Number.isInteger(session.total) || session.total < 2 ||
+        !session.fragments || typeof session.fragments !== 'object' || Array.isArray(session.fragments) ||
+        !Number.isFinite(session.createdAt) || Date.now() - session.createdAt > 24 * 60 * 60 * 1000) return false;
+    for (const key of Object.keys(session.fragments)) {
+        const index = Number(key);
+        if (!Number.isInteger(index) || index < 0 || index >= session.total || typeof session.fragments[key] !== 'string') return false;
+    }
+    if (session.metadata !== null && !isValidV2Metadata(session.kind, session.metadata)) return false;
+    if (Object.prototype.hasOwnProperty.call(session.fragments, 0) && !session.metadata) return false;
+    return true;
+}
+
+function restoreV2Session(serialized) {
+    try {
+        const session = typeof serialized === 'string' ? JSON.parse(serialized) : serialized;
+        if (!validateStoredV2Session(session)) return false;
+        activeTransfer = JSON.parse(JSON.stringify(session));
+        activeTransfer.status = 'receiving';
+        activeTransfer.downloadAllowed = false;
+        v2VerifiedResult = null;
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+function loadV2Session() {
+    try {
+        const serialized = localStorage.getItem(V2_SESSION_KEY);
+        if (!serialized) return false;
+        if (!restoreV2Session(serialized)) {
+            localStorage.removeItem(V2_SESSION_KEY);
+            return false;
+        }
+        return true;
+    } catch (error) {
+        localStorage.removeItem(V2_SESSION_KEY);
+        return false;
+    }
+}
+
+function base64ToBytesV2(base64) {
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)) {
+        throw new Error('invalid-base64');
+    }
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+}
+
+async function sha256HexV2(bytes) {
+    const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
+    return Array.from(new Uint8Array(digest), function(byte) {
+        return byte.toString(16).padStart(2, '0');
+    }).join('');
+}
+
+async function verifyV2Transfer() {
+    if (!activeTransfer || !activeTransfer.metadata) return { ok: false, reason: 'metadata-missing' };
+    for (let index = 0; index < activeTransfer.total; index++) {
+        if (!Object.prototype.hasOwnProperty.call(activeTransfer.fragments, index)) return { ok: false, reason: 'fragment-missing' };
+    }
+
+    let bytes;
+    try {
+        let base64 = '';
+        for (let index = 1; index < activeTransfer.total; index++) base64 += activeTransfer.fragments[index];
+        bytes = base64ToBytesV2(base64);
+    } catch (error) {
+        activeTransfer.status = 'damaged';
+        activeTransfer.downloadAllowed = false;
+        return { ok: false, reason: 'invalid-base64' };
+    }
+
+    if (activeTransfer.kind === 'f' && bytes.length !== activeTransfer.metadata.s) {
+        activeTransfer.status = 'damaged';
+        activeTransfer.downloadAllowed = false;
+        return { ok: false, reason: 'size-mismatch' };
+    }
+    const hash = await sha256HexV2(bytes);
+    if (hash !== activeTransfer.metadata.h) {
+        activeTransfer.status = 'damaged';
+        activeTransfer.downloadAllowed = false;
+        return { ok: false, reason: 'hash-mismatch' };
+    }
+
+    let text = null;
+    if (activeTransfer.kind === 't') {
+        try {
+            text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        } catch (error) {
+            activeTransfer.status = 'damaged';
+            return { ok: false, reason: 'utf8-invalid' };
+        }
+    }
+    activeTransfer.status = 'complete';
+    activeTransfer.downloadAllowed = activeTransfer.kind === 'f';
+    v2VerifiedResult = { ok: true, kind: activeTransfer.kind, text: text, bytes: bytes };
+    saveV2Session();
+    return { ok: true, kind: activeTransfer.kind, text: text, bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+}
+
+function resetV2State() {
+    activeTransfer = null;
+    v2VerifiedResult = null;
+    v2VerificationInProgress = false;
+    try { localStorage.removeItem(V2_SESSION_KEY); } catch (error) {}
+}
+
+async function finalizeV2Transfer() {
+    if (!activeTransfer || v2VerificationInProgress) return;
+    v2VerificationInProgress = true;
+    const result = await verifyV2Transfer();
+    v2VerificationInProgress = false;
+
+    if (!result.ok) {
+        activeTransfer.status = 'damaged';
+        activeTransfer.downloadAllowed = false;
+        const errorDiv = document.getElementById('checksumError');
+        if (errorDiv) errorDiv.style.display = 'block';
+        document.getElementById('downloadBtn').disabled = true;
+        updateScanProgress('❌ 数据校验失败: ' + result.reason, Object.keys(activeTransfer.fragments).length, activeTransfer.total);
+        scanning = false;
+        stopScan();
+        setState('complete');
+        return;
+    }
+
+    if (result.kind === 't') {
+        document.getElementById('output').textContent = result.text;
+        document.getElementById('chunksList').style.display = 'none';
+        document.getElementById('copyBtn').style.display = 'block';
+        clearSession();
+    } else {
+        document.getElementById('fileProgress').textContent = '✅ 文件接收完成并通过 SHA-256 校验！';
+        document.getElementById('downloadBtn').disabled = false;
+    }
+    updateScanProgress('✅ 扫描与校验完成！', activeTransfer.total, activeTransfer.total);
+    scanning = false;
+    stopScan();
+    setState('complete');
+}
+
+function handleV2Fragment(fragment) {
+    const result = acceptV2Fragment(fragment);
+    if (!result.accepted) {
+        if (result.reason === 'other-transfer') {
+            updateScanProgress('⚠️ 检测到其他传输，请先重新开始', Object.keys(activeTransfer.fragments).length, activeTransfer.total);
+        } else {
+            updateScanProgress('⚠️ 已忽略无效V2片段: ' + result.reason, activeTransfer ? Object.keys(activeTransfer.fragments).length : 0, activeTransfer ? activeTransfer.total : 0);
+        }
+        return result;
+    }
+
+    const receivedCount = Object.keys(activeTransfer.fragments).length;
+    updateProgressMap(activeTransfer.total, activeTransfer.fragments, fragment.i);
+    const missingSection = document.getElementById('missingFragmentsSection');
+    if (missingSection) missingSection.style.display = 'block';
+    const lastScanned = document.getElementById('lastScannedInfo');
+    if (lastScanned) lastScanned.textContent = result.duplicate
+        ? `最后扫描: #${fragment.i + 1} (重复)`
+        : `最后扫描: #${fragment.i + 1} ✓ 新`;
+    updateProgressBar(receivedCount, activeTransfer.total);
+
+    if (activeTransfer.kind === 'f') {
+        updateScanProgress(`📁 接收文件中: ${receivedCount}/${activeTransfer.total}`, receivedCount, activeTransfer.total);
+        document.getElementById('fileProgressText').textContent = `${receivedCount} / ${activeTransfer.total}`;
+        if (activeTransfer.metadata) {
+            document.getElementById('file-download-section').style.display = 'block';
+            document.getElementById('downloadFileName').textContent = activeTransfer.metadata.n;
+            document.getElementById('downloadFileSize').textContent = formatBytes(activeTransfer.metadata.s);
+            document.getElementById('downloadFileType').textContent = activeTransfer.metadata.y;
+            document.getElementById('downloadBtn').disabled = true;
+        }
+    } else {
+        updateScanProgress(`📝 接收私有文本中: ${receivedCount}/${activeTransfer.total}`, receivedCount, activeTransfer.total);
+        document.getElementById('output').textContent = activeTransfer.metadata
+            ? `正在接收私有文本 ${receivedCount}/${activeTransfer.total}`
+            : `已接收 ${receivedCount}/${activeTransfer.total}，等待第1片`;
+    }
+
+    if (receivedCount === activeTransfer.total && activeTransfer.metadata) {
+        finalizeV2Transfer().catch(function(error) {
+            console.error('V2完成校验失败:', error);
+            updateScanProgress('❌ 完成校验异常', receivedCount, activeTransfer.total);
+        });
+    }
+    return result;
 }
 
 // ========== T043 & T026-T027: 文本片段处理函数（集成会话持久化）==========
@@ -11009,7 +11305,11 @@ function showMissingFragments() {
     if (!listDiv) return;
     let missing = [];
 
-    if (fileTotalFragments > 0) {
+    if (activeTransfer) {
+        for (let i = 0; i < activeTransfer.total; i++) {
+            if (!Object.prototype.hasOwnProperty.call(activeTransfer.fragments, i)) missing.push(i + 1);
+        }
+    } else if (fileTotalFragments > 0) {
         for (let i = 0; i < fileTotalFragments; i++) {
             if (!(i in fileFragments)) missing.push(i + 1);
         }
@@ -11020,7 +11320,7 @@ function showMissingFragments() {
     }
 
     var lang = (document.documentElement.lang || 'zh').startsWith('zh') ? 'zh' : 'en';
-    var total = fileTotalFragments > 0 ? fileTotalFragments : totalChunks;
+    var total = activeTransfer ? activeTransfer.total : (fileTotalFragments > 0 ? fileTotalFragments : totalChunks);
 
     if (missing.length === 0) {
         listDiv.innerHTML = '<span style="color:var(--success);">✅ ' + (lang === 'zh' ? '所有片段已接收！' : 'All fragments received!') + '</span>';
@@ -11286,20 +11586,17 @@ let currentSession = null;
 
 // T023: 检查会话恢复（在页面加载时调用）
 function checkSessionRecovery() {
-    const session = loadSession();
-
-    if (session && !isSessionExpired(session)) {
-        currentSession = session;
-        showRecoveryBanner(session);
-        // Show recovery state with details
-        var detail = document.getElementById('recovery-detail');
+    if (loadV2Session()) {
+        showRecoveryBanner(activeTransfer);
+        const detail = document.getElementById('recovery-detail');
         if (detail) {
-            var cnt = Object.keys(session.receivedFragments).length;
-            var tot = session.totalFragments;
-            if (session.type === 'file' && session.metadata) {
-                detail.textContent = session.metadata.fileName + ' — ' + cnt + '/' + tot + ' 片';
+            const count = Object.keys(activeTransfer.fragments).length;
+            if (activeTransfer.kind === 'f' && activeTransfer.metadata) {
+                detail.textContent = activeTransfer.metadata.n + ' — ' + count + '/' + activeTransfer.total + ' 片';
+            } else if (!activeTransfer.metadata) {
+                detail.textContent = '等待第1片 — 已接收 ' + count + '/' + activeTransfer.total + ' 片';
             } else {
-                detail.textContent = '已接收 ' + cnt + '/' + tot + ' 片';
+                detail.textContent = '已接收 ' + count + '/' + activeTransfer.total + ' 片';
             }
         }
         setState('recovery');
@@ -11313,25 +11610,29 @@ function showRecoveryBanner(session) {
     const banner = document.getElementById('recovery-banner');
     const message = document.getElementById('recovery-message');
 
-    const receivedCount = Object.keys(session.receivedFragments).length;
-    const total = session.totalFragments;
+    const fragments = session.fragments || session.receivedFragments || {};
+    const receivedCount = Object.keys(fragments).length;
+    const total = session.total || session.totalFragments;
+    const kind = session.kind || session.type;
+    const metadata = session.metadata;
 
-    let messageText = '';
-
-    if (session.type === 'file' && session.metadata) {
-        // 文件传输恢复消息 (T047)
-        const fileName = session.metadata.fileName;
-        messageText = `🔄 <strong>已恢复文件传输:</strong> ${fileName} - 已接收 ${receivedCount}/${total} 片`;
-    } else {
-        // 文本传输恢复消息
-        messageText = `🔄 <strong>已恢复传输会话:</strong> 已接收 ${receivedCount}/${total} 片`;
+    message.replaceChildren();
+    message.appendChild(document.createTextNode('🔄 '));
+    const strong = document.createElement('strong');
+    strong.textContent = kind === 'f' || kind === 'file' ? '已恢复文件传输:' : '已恢复文本传输:';
+    message.appendChild(strong);
+    let detail = ' ';
+    if ((kind === 'f' || kind === 'file') && metadata) {
+        detail += (metadata.n || metadata.fileName || '未命名文件') + ' - ';
+    } else if (!metadata && session.id) {
+        detail += '等待第1片 (' + session.id + ') - ';
     }
-
-    message.innerHTML = messageText;
+    detail += '已接收 ' + receivedCount + '/' + total + ' 片';
+    message.appendChild(document.createTextNode(detail));
     banner.style.display = 'flex';
     document.body.classList.add('has-recovery-banner');
 
-    console.log('显示恢复横幅:', session.id);
+    console.log('显示恢复横幅:', session.id || 'legacy');
 }
 
 // 继续会话（用户点击"继续传输"）
@@ -11340,38 +11641,29 @@ function continueSession() {
     banner.style.display = 'none';
     document.body.classList.remove('has-recovery-banner');
 
-    // Restore state and start scanning
     hasReceivedFirstFragment = true;
+    if (activeTransfer) {
+        const receivedCount = Object.keys(activeTransfer.fragments).length;
+        const total = activeTransfer.total;
+        updateProgressMap(total, activeTransfer.fragments, -1);
+        updateProgressBar(receivedCount, total);
+        const missingSection = document.getElementById('missingFragmentsSection');
+        if (missingSection) missingSection.style.display = 'block';
 
-    // 恢复UI状态
-    if (currentSession) {
-        const receivedCount = Object.keys(currentSession.receivedFragments).length;
-        const total = currentSession.totalFragments;
-
-        if (currentSession.type === 'file' && currentSession.metadata) {
-            // 恢复文件传输UI
+        if (activeTransfer.kind === 'f' && activeTransfer.metadata) {
             document.getElementById('file-download-section').style.display = 'block';
-            document.getElementById('downloadFileName').textContent = currentSession.metadata.fileName;
-            document.getElementById('downloadFileSize').textContent = formatBytes(currentSession.metadata.fileSize);
-            document.getElementById('downloadFileType').textContent = currentSession.metadata.mimeType;
+            document.getElementById('downloadFileName').textContent = activeTransfer.metadata.n;
+            document.getElementById('downloadFileSize').textContent = formatBytes(activeTransfer.metadata.s);
+            document.getElementById('downloadFileType').textContent = activeTransfer.metadata.y;
             document.getElementById('fileProgressText').textContent = `${receivedCount} / ${total}`;
-
-            // 恢复全局变量
-            fileFragments = currentSession.receivedFragments;
-            fileMetadata = currentSession.metadata;
-            fileTotalFragments = total;
         } else {
-            // 恢复文本传输UI
-            chunks = currentSession.receivedFragments;
-            totalChunks = total;
-            updateOutput();
-            updateScanProgress('🔍 继续扫描...', receivedCount, total);
+            document.getElementById('output').textContent = activeTransfer.metadata
+                ? `继续接收私有文本 ${receivedCount}/${total}`
+                : `已接收 ${receivedCount}/${total}，等待第1片`;
         }
-
+        updateScanProgress('🔍 继续扫描...', receivedCount, total);
         console.log('会话已恢复，继续传输');
     }
-
-    // Start scanning to continue receiving
     startScan();
 }
 
@@ -11393,6 +11685,35 @@ function formatBytes(bytes) {
 
 // ========== T047: 触发文件下载（iOS Safari兼容）==========
 function triggerFileDownload() {
+    if (activeTransfer && activeTransfer.kind === 'f') {
+        if (!v2VerifiedResult || !v2VerifiedResult.ok || !activeTransfer.downloadAllowed) {
+            alert('文件尚未通过完整性校验');
+            return;
+        }
+        try {
+            const blob = new Blob([v2VerifiedResult.bytes], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = activeTransfer.metadata.n;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(function() {
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            }, 100);
+            clearSession();
+            const button = document.getElementById('downloadBtn');
+            const originalText = button.textContent;
+            button.textContent = '✅ 下载已开始';
+            setTimeout(function() { button.textContent = originalText; }, 2000);
+        } catch (error) {
+            console.error('V2文件下载失败:', error);
+            alert('文件下载失败: ' + error.message);
+        }
+        return;
+    }
     if (!fileMetadata) {
         alert('没有可下载的文件');
         return;
@@ -11499,10 +11820,11 @@ function scan() {
 
             // 路由到对应处理器（不在 try-catch 中，避免吞掉处理器异常）
             if (data) {
-                if (data.type === 'file') {
-                    handleFileFragment(data);
-                } else if (data.i !== undefined && data.t && data.d) {
-                    handleTextFragment(data);
+                if (data.v === 2 && (data.k === 't' || data.k === 'f')) {
+                    handleV2Fragment(data);
+                } else if (data.type === 'file' || data.i !== undefined) {
+                    console.log('检测到不兼容的旧版私有二维码');
+                    document.getElementById('output').textContent = '此二维码使用旧版私有协议，请用新版发送端重新生成。';
                 } else {
                     console.log('非分片QR码，原始数据:', code.data);
                     document.getElementById('output').textContent = code.data;
@@ -11586,6 +11908,29 @@ function minimizeVideo() {
 function normalizeVideo() {
     const video = document.getElementById('video');
     video.classList.remove('hidden', 'minimized');
+}
+
+if (new URLSearchParams(window.location.search).get('test') === '1') {
+    window.QRReceiverTestAPI = Object.freeze({
+        reset: resetV2State,
+        accept: acceptV2Fragment,
+        snapshot: snapshotV2State,
+        exportSession: exportV2Session,
+        restore: restoreV2Session,
+        verify: verifyV2Transfer,
+        renderRecoveryName: function(fileName) {
+            showRecoveryBanner({
+                version: 2,
+                id: '0123456789abcdef',
+                kind: 'f',
+                total: 2,
+                fragments: { 0: '' },
+                metadata: { n: fileName, y: 'text/plain', s: 0, h: '0'.repeat(64) }
+            });
+        },
+        recoveryText: function() { return document.getElementById('recovery-message').textContent; },
+        recoveryHTML: function() { return document.getElementById('recovery-message').innerHTML; }
+    });
 }
 
 // ========== T023: 页面加载时检查会话恢复 ==========
