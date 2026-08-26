@@ -86,7 +86,7 @@ new File([verifiedBytes], fileName, { type: originalMime || 'application/octet-s
 
 - 所有平台保留“直接下载”作为后备。
 - 使用 `File` 的真实 MIME 创建 Blob URL，并设置原始文件名为 `download`。
-- 触发点击后不再在 100ms 内撤销 URL。链接节点可延迟移除，Blob URL 至少保留 60 秒，并在 `pagehide` 时统一回收。
+- 触发点击后不再在 100ms 内撤销 URL。链接节点可延迟移除，Blob URL 至少保留 60 秒；页面销毁时交由浏览器释放，避免 `pagehide` 再次过早撤销。
 - 文案使用“已请求下载，请检查浏览器下载项”，不声称已经保存成功。
 - 直接下载后不清除传输会话。
 

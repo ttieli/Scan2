@@ -57,6 +57,18 @@ A 50 KB document transfers in under 30 seconds on M level. Not blazing fast, but
 
 `sender.html` and `receiver.html` are each fully self-contained. Neither page needs a CDN, an external JavaScript file, a server, or a build step. Private V2 transfers have a stable transfer ID; while one transfer is active, fragments from other transfers are ignored until you choose **Start Over**.
 
+### QR Display Size
+
+Loop and Single modes share a 160–360px size slider in the fullscreen viewer. The default is 220px and the last choice is remembered. Grid mode is unchanged.
+
+### Saving Received Files
+
+- **Share / Save File** appears when the browser supports file sharing. On iPhone or iPad, choose **Save to Files** in the system share sheet.
+- **Direct Download** is always available and keeps the received session so you can retry.
+- **Open Preview** appears for PDF, text, image, audio, and video files.
+- On iOS, downloads are normally in **Files → Downloads**. The exact location is controlled by **Settings → Apps → Safari → Downloads** and cannot be forced by a webpage.
+- Other browsers may save automatically, ask for a destination, or open a supported file type. Check the browser download list or system file manager.
+
 ## How It Works
 
 ```
@@ -145,6 +157,18 @@ Sender                              Receiver
 | 文件 | 私有 | QR Transfer 接收端 | V2 连续扫描、SHA-256 校验和下载 |
 
 `sender.html` 和 `receiver.html` 各自都是完整自包含页面，不需要 CDN、外部 JavaScript、服务器或构建步骤。私有 V2 传输使用稳定传输 ID；当前传输未结束时，其他传输的片段会被忽略，选择“重新开始”后才能切换。
+
+### 二维码显示尺寸
+
+循环播放和单张显示在全屏查看器中共用 160–360px 尺寸滑杆，默认 220px，并记住上次选择。网格平铺不受影响。
+
+### 保存接收文件
+
+- 浏览器支持文件分享时显示**分享 / 存储文件**。iPhone 或 iPad 可在系统分享面板中选择“存储到文件”。
+- **直接下载**始终可用，而且不会清除已接收会话，可以重复尝试。
+- PDF、文本、图片、音频和视频会额外显示**打开预览**。
+- iOS 下载通常位于**文件 App → 下载项**；确切位置由“设置 → App → Safari → 下载项”决定，网页无法强制指定。
+- 其他浏览器可能自动保存、询问目录或直接打开支持的文件类型，请检查浏览器下载列表或系统文件管理器。
 
 ## 工作原理
 

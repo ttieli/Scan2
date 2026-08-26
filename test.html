@@ -99,8 +99,8 @@
     </div>
 
     <div id="qrWorkspace"></div>
-    <iframe id="senderTestFrame" src="sender.html?test=1&amp;v=9" hidden></iframe>
-    <iframe id="receiverTestFrame" src="receiver.html?test=1&amp;v=9" hidden></iframe>
+    <iframe id="senderTestFrame" src="sender.html?test=1&amp;v=13" hidden></iframe>
+    <iframe id="receiverTestFrame" src="receiver.html?test=1&amp;v=13" hidden></iframe>
 
 <script>
 // 内嵌 qrcode.min.js
@@ -11150,7 +11150,7 @@ async function testQRDisplaySizeModes(id) {
         requireCondition(loop.visible === true && loop.size === 240, '循环尺寸控件错误');
         requireCondition(single.visible === true && single.size === 240, '单张尺寸控件错误');
         requireCondition(sender.loopUsesTransformScale() === false, '循环仍整体缩放卡片');
-        requireCondition(sender.fullscreenUsesDisplaySize() === false, '全屏错误继承普通尺寸');
+        requireCondition(sender.fullscreenUsesDisplaySize() === true, '循环/单张全屏未应用尺寸');
         sender.resetDisplayQRSizeForTest();
     });
 }

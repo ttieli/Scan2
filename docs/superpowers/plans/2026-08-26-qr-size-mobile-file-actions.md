@@ -186,7 +186,7 @@ Call `navigator.share({ files: [file] })` directly from the click handler. Treat
 
 - [ ] **Step 5: Implement reliable direct download**
 
-Create a Blob URL from the original `File`, click an anchor with `download=file.name`, set feedback to “已请求下载…”, remove the anchor after 1 second, and schedule URL revocation at 60 seconds. Track outstanding URLs in a Set and revoke them on `pagehide`. Do not call `clearSession()`.
+Create a Blob URL from the original `File`, click an anchor with `download=file.name`, set feedback to “已请求下载…”, remove the anchor after 1 second, and schedule URL revocation at 60 seconds. Do not revoke during `pagehide`; browser teardown releases remaining URLs. Do not call `clearSession()`.
 
 - [ ] **Step 6: Implement preview**
 
