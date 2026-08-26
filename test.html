@@ -99,8 +99,8 @@
     </div>
 
     <div id="qrWorkspace"></div>
-    <iframe id="senderTestFrame" src="sender.html?test=1&amp;v=7" hidden></iframe>
-    <iframe id="receiverTestFrame" src="receiver.html?test=1&amp;v=7" hidden></iframe>
+    <iframe id="senderTestFrame" src="sender.html?test=1&amp;v=8" hidden></iframe>
+    <iframe id="receiverTestFrame" src="receiver.html?test=1&amp;v=8" hidden></iframe>
 
 <script>
 // 内嵌 qrcode.min.js
@@ -10453,6 +10453,8 @@ const tests = [
     { id: 'T20', name: '文本公有/私有模式显式可选', type: 'ui' },
     { id: 'T21', name: '文本与文件按当前标签路由', type: 'ui' },
     { id: 'T22', name: '生产接收 UI 完成与下载状态', type: 'ui' },
+    { id: 'T23', name: '公有中文容量边界预留 BOM', type: 'qr' },
+    { id: 'T24', name: '仅显示一个纠错级别选择器', type: 'ui' },
 ];
 
 // Render test list
@@ -11089,6 +11091,30 @@ async function testReceiverUICompletion(id) {
     });
 }
 
+async function testPublicBomBoundary(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender, 'QRSenderTestAPI 尚未实现');
+        const boundaryText = '中'.repeat(424); // 1272 UTF-8 bytes + QRCode.js 3-byte BOM
+        const parts = sender.splitPublicText(boundaryText, 'H');
+        requireCondition(parts.length > 1, '中文边界文本未预留BOM容量');
+        parts.forEach(function(part) {
+            const decoded = encodeAndDecode(part, 'H');
+            requireCondition(decoded.success && decoded.data === part, '中文边界公有QR无法标准解码');
+        });
+    });
+}
+
+async function testErrorLevelControlCount(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender && sender.visibleErrorLevelControls, '纠错选择器测试 API 尚未实现');
+        sender.selectInputTab('text');
+        sender.selectTextMode('universal');
+        requireCondition(sender.visibleErrorLevelControls() === 1, '公有文本显示了重复纠错选择器');
+    });
+}
+
 // ============================================================
 // Main test runner
 // ============================================================
@@ -11149,6 +11175,12 @@ async function runAllTests() {
                         break;
                     case 'T22':
                         ok = await testReceiverUICompletion('T22');
+                        break;
+                    case 'T23':
+                        ok = await testPublicBomBoundary('T23');
+                        break;
+                    case 'T24':
+                        ok = await testErrorLevelControlCount('T24');
                         break;
                 }
                 if (ok) passed++;

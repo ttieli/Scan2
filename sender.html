@@ -345,7 +345,6 @@ function setTextProtocolMode(selectedMode) {
     document.getElementsByName('qrMode').forEach(function(radio) {
         radio.checked = radio.value === selectedMode;
     });
-    document.getElementById('universalErrorLevel').value = document.getElementById('errorLevel').value;
     handleModeChange();
     updateEstimate();
     return true;
@@ -552,11 +551,13 @@ function splitUtf8Text(text, byteBudget) {
 }
 
 function splitPublicText(text, errorLevel) {
-    const capacity = PUBLIC_QR_CAPACITY[errorLevel] || PUBLIC_QR_CAPACITY.H;
-    if (utf8ByteLength(text) <= capacity) return [text];
+    const maximumCapacity = PUBLIC_QR_CAPACITY[errorLevel] || PUBLIC_QR_CAPACITY.H;
+    const singleCapacity = maximumCapacity - (/[^\x00-\x7F]/.test(text) ? 3 : 0);
+    if (utf8ByteLength(text) <= singleCapacity) return [text];
 
     // Reserve enough room for the readable sequence prefix. Recalculate until
     // the final prefix and every Unicode-safe text part fit the QR capacity.
+    const capacity = maximumCapacity - 3; // The Chinese sequence prefix makes QRCode.js add a UTF-8 BOM.
     let payloadBudget = capacity - 64;
     while (payloadBudget > 0) {
         const rawParts = splitUtf8Text(text, payloadBudget);
@@ -674,8 +675,8 @@ function handleModeChange() {
     const loopSpeedGroup = document.getElementById('optgroup-speed');
 
     if (mode === 'universal') {
-        // 通用模式: 显示纠错级别选择器，隐藏分片策略、循环速度和文件上传
-        errorLevelContainer.style.display = 'block';
+        // 公有文本复用高级选项里的同一个纠错级别选择器。
+        errorLevelContainer.style.display = 'none';
         if (chunkStrategyGroup) chunkStrategyGroup.style.display = 'none';
         if (loopSpeedGroup) loopSpeedGroup.style.display = 'none';
         if (loopingControls) loopingControls.style.display = 'none';
@@ -1046,7 +1047,7 @@ function generatePrivateQRCodes(fragments) {
 
 // Universal QR Generation (T012)
 function generateUniversalQR(text) {
-    const errorLevel = document.getElementById('universalErrorLevel').value;
+    const errorLevel = document.getElementById('errorLevel').value;
     const display = document.getElementById('qrDisplay');
     display.innerHTML = '';
     qrCodes = [];
@@ -1188,7 +1189,12 @@ if (new URLSearchParams(window.location.search).get('test') === '1') {
             return window.getComputedStyle(document.getElementById('textModeSelector')).display !== 'none';
         },
         selectInputTab: switchInputTab,
-        getActiveInputType: getActiveInputType
+        getActiveInputType: getActiveInputType,
+        visibleErrorLevelControls: function() {
+            const primaryVisible = window.getComputedStyle(document.getElementById('optgroup-error')).display !== 'none';
+            const legacyVisible = window.getComputedStyle(document.getElementById('error-level-container')).display !== 'none';
+            return (primaryVisible ? 1 : 0) + (legacyVisible ? 1 : 0);
+        }
     });
 }
 
