@@ -51,6 +51,8 @@ The separate **Enhanced** mode uses RaptorQ, CRC32C, WebAssembly QR codecs and 1
 - **Enhanced RaptorQ Mode** — fountain-code repair symbols recover missed frames without waiting for specific fragment numbers or replaying an identical round.
 - **Parallel QR Playback** — Enhanced mode supports one, two, or four QR symbols per tick and defaults to two.
 - **Front / Rear Camera** — the Enhanced receiver can explicitly request either camera, including iOS Safari.
+- **RaptorQ Progress Map** — Enhanced receiver shows direct source-symbol coverage, repair-symbol count, useful-packet progress and up to 200 visual buckets.
+- **Missing-only Recovery Loop** — copy an `RQ1` request from the Enhanced receiver, paste it into the Enhanced sender, and replay only missing source QR packets.
 - **Bilingual** — Chinese and English, auto-detected.
 
 ## Transfer Modes
@@ -64,6 +66,8 @@ The separate **Enhanced** mode uses RaptorQ, CRC32C, WebAssembly QR codecs and 1
 | File | Enhanced | Enhanced receiver | 1/2/4 QR playback, RaptorQ recovery, CRC32C and final SHA-256 |
 
 `sender.html`, `receiver.html`, `sender-fast.html`, and `receiver-fast.html` are each fully self-contained. None of them needs a CDN, external JavaScript/WASM, or a server-side API. The Enhanced pages embed their Workers and WASM codecs directly in the HTML; `fast-mode/` is only the reproducible build source. Camera capture still requires a browser secure context such as HTTPS or localhost.
+
+For targeted recovery, keep the receiver scanning and choose **Generate missing-only recovery request**. Copy the request, select the same file and QR settings in the Enhanced sender, paste it into **Missing-only recovery request**, then start playback again. The sender validates data length and symbol size before applying the request.
 
 Classic file sends now use the uniform V3 wire format. The receiver continues to accept existing private V2 transfers.
 
@@ -172,6 +176,8 @@ Sender                              Receiver
 - **RaptorQ 增强模式** — 通过持续生成修复符号恢复漏扫帧，不再等待某个固定编号或重放完全相同的一轮。
 - **多二维码并行** — 增强模式支持单码、双码和四码，默认双码。
 - **前置 / 后置摄像头** — 增强接收端可以明确选择摄像头，包括 iOS Safari。
+- **RaptorQ 进度框** — 增强接收端显示源符号覆盖、修复符号数量、有效包进度和最多 200 个可视化进度格。
+- **遗漏二维码定向补扫** — 从增强接收端复制 `RQ1` 请求，粘贴到增强发送端后只循环遗漏的源二维码。
 - **中英双语** — 自动检测语言，也可手动切换。
 
 ## 传输模式
@@ -185,6 +191,8 @@ Sender                              Receiver
 | 文件 | 增强 | 增强接收端 | 1/2/4 码播放、RaptorQ 恢复、CRC32C 和最终 SHA-256 |
 
 `sender.html`、`receiver.html`、`sender-fast.html` 和 `receiver-fast.html` 都是完整自包含页面，不需要 CDN、外部 JavaScript/WASM 或服务端接口。增强页面把 Worker 和 WASM 编解码器直接嵌入 HTML；`fast-mode/` 只用于可重复构建。摄像头仍需要 HTTPS 或 localhost 等浏览器安全上下文。
+
+需要定向补扫时，保持接收端扫描并点击 **Generate missing-only recovery request**，复制请求；在增强发送端选择同一文件和相同二维码参数，将请求粘贴到 **Missing-only recovery request** 后重新开始。发送端会先核对数据长度和 symbol size，匹配后才进入遗漏包循环。
 
 经典文件发送现在默认使用均匀 V3 协议，接收端仍兼容已有的私有 V2 传输。
 

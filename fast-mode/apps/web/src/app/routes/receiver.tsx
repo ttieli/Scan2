@@ -39,6 +39,7 @@ type InputMode = 'camera' | 'gif-file';
 
 type CSSProps = Record<string, string | number>;
 type DecodeRateSample = { time: number; count: number };
+type SourceProgressBucket = { received: number; total: number };
 
 const MIN_SCAN_RATE_FPS = 2;
 const MAX_SCAN_RATE_FPS = 60;
@@ -264,6 +265,13 @@ export function ReceiverPage() {
   const [throughputKbps, setThroughputKbps] = useState(0);
   const [solvedGens, setSolvedGens] = useState(0);
   const [sourceGens, setSourceGens] = useState(0);
+  const [sourceTotal, setSourceTotal] = useState(0);
+  const [sourceReceived, setSourceReceived] = useState(0);
+  const [repairReceived, setRepairReceived] = useState(0);
+  const [sourceBuckets, setSourceBuckets] = useState<SourceProgressBucket[]>([]);
+  const [recoveryRequest, setRecoveryRequest] = useState('');
+  const [recoveryMissingCount, setRecoveryMissingCount] = useState(0);
+  const [recoveryCopied, setRecoveryCopied] = useState(false);
   const scanStartRef = useRef<number>(0);
   const dataLengthRef = useRef<number>(0);
   const decodedQrCountRef = useRef(0);
@@ -334,6 +342,10 @@ export function ReceiverPage() {
           setNeededPackets(msg.neededPackets ?? 0);
           setSolvedGens(msg.solvedGenerations ?? 0);
           setSourceGens(msg.sourceGenerations ?? 0);
+          setSourceTotal(msg.sourceTotal ?? 0);
+          setSourceReceived(msg.sourceReceived ?? 0);
+          setRepairReceived(msg.repairReceived ?? 0);
+          setSourceBuckets(Array.isArray(msg.sourceBuckets) ? msg.sourceBuckets : []);
           setDetectedQrVersion(msg.qrVersion ?? 0);
           setDetectedSymbolSize(msg.symbolSize ?? 0);
           setDetectedFecCodec(msg.fecCodec ?? '');
@@ -353,6 +365,12 @@ export function ReceiverPage() {
             }
           }
           setStatus(msg.status);
+          break;
+        }
+        case 'recoveryRequest': {
+          setRecoveryRequest(msg.code ?? '');
+          setRecoveryMissingCount(msg.missingCount ?? 0);
+          setRecoveryCopied(false);
           break;
         }
         case 'complete': {
@@ -489,6 +507,13 @@ export function ReceiverPage() {
     setThroughputKbps(0);
     setSolvedGens(0);
     setSourceGens(0);
+    setSourceTotal(0);
+    setSourceReceived(0);
+    setRepairReceived(0);
+    setSourceBuckets([]);
+    setRecoveryRequest('');
+    setRecoveryMissingCount(0);
+    setRecoveryCopied(false);
     setVerifiedSha256('');
     scanStartRef.current = 0;
     dataLengthRef.current = 0;
@@ -575,6 +600,13 @@ export function ReceiverPage() {
     setThroughputKbps(0);
     setSolvedGens(0);
     setSourceGens(0);
+    setSourceTotal(0);
+    setSourceReceived(0);
+    setRepairReceived(0);
+    setSourceBuckets([]);
+    setRecoveryRequest('');
+    setRecoveryMissingCount(0);
+    setRecoveryCopied(false);
     setVerifiedSha256('');
     scanStartRef.current = 0;
     dataLengthRef.current = 0;
@@ -726,6 +758,25 @@ export function ReceiverPage() {
     }
   }, [receivedText]);
 
+  const handleGenerateRecoveryRequest = useCallback(() => {
+    if (!workerRef.current) {
+      setError('Keep the RaptorQ scanner running while generating a recovery request.');
+      return;
+    }
+    workerRef.current.postMessage({ type: 'recoveryRequest' });
+  }, []);
+
+  const handleCopyRecoveryRequest = useCallback(async () => {
+    if (!recoveryRequest) return;
+    try {
+      await copyTextToClipboard(recoveryRequest);
+      setRecoveryCopied(true);
+      window.setTimeout(() => setRecoveryCopied(false), 1500);
+    } catch (err: any) {
+      setError(`Copy failed: ${err.message ?? String(err)}`);
+    }
+  }, [recoveryRequest]);
+
   // ── Cleanup on unmount ─────────────────────────────────────────────────
   useEffect(() => {
     return () => {
@@ -741,6 +792,13 @@ export function ReceiverPage() {
       }
     };
   }, []);
+
+  const decodeProgressPercent = verifiedSha256
+    ? 100
+    : neededPackets > 0
+    ? Math.min(99, Math.round(acceptedPackets / neededPackets * 100))
+    : 0;
+  const missingSourceCount = Math.max(0, sourceTotal - sourceReceived);
 
   // ── Render ────────────────────────────────────────────────────────────────────────────
   return (
@@ -1133,6 +1191,84 @@ export function ReceiverPage() {
             </div>
           )}
           {error && <div style={{ ...S.warn, marginTop: 8 }}>⚠ {error}</div>}
+        </div>
+      )}
+
+      {/* ── RaptorQ source progress and targeted recovery ──────────────── */}
+      {sourceTotal > 0 && (
+        <div style={S.section}>
+          <div style={{ ...S.row, justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <div style={S.label}>RaptorQ Progress</div>
+            <span style={S.statValue}>{decodeProgressPercent}% · {acceptedPackets}/{neededPackets || '?'}</span>
+          </div>
+          <div style={{ height: 10, overflow: 'hidden', borderRadius: 999, background: '#21262d', marginBottom: 10 }}>
+            <div style={{ width: `${decodeProgressPercent}%`, height: '100%', background: '#3fb950', transition: 'width 0.2s' }} />
+          </div>
+          <div style={{ ...S.statsBar, marginTop: 0, marginBottom: 10 }}>
+            <span>source <span style={S.statValue}>{sourceReceived}/{sourceTotal}</span></span>
+            <span>repair <span style={S.statValue}>{repairReceived}</span></span>
+            <span>direct missing <span style={S.statValue}>{missingSourceCount}</span></span>
+          </div>
+          <div
+            aria-label="RaptorQ source packet progress map"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(20, minmax(4px, 1fr))',
+              gap: 3,
+              padding: 10,
+              background: '#0d1117',
+              borderRadius: 6,
+              marginBottom: 12,
+            }}
+          >
+            {sourceBuckets.map((bucket, index) => {
+              const ratio = bucket.total > 0 ? bucket.received / bucket.total : 0;
+              return (
+                <span
+                  key={index}
+                  title={`source bucket ${index + 1}: ${bucket.received}/${bucket.total}`}
+                  style={{
+                    aspectRatio: '1',
+                    minHeight: 5,
+                    borderRadius: 2,
+                    background: ratio >= 1 ? '#3fb950' : ratio > 0 ? `rgba(63,185,80,${Math.max(0.22, ratio)})` : '#30363d',
+                  }}
+                />
+              );
+            })}
+          </div>
+          <div style={S.row}>
+            <button
+              type="button"
+              style={S.btnSecondary}
+              disabled={!scanning || missingSourceCount === 0}
+              onClick={handleGenerateRecoveryRequest}
+            >
+              Generate missing-only recovery request
+            </button>
+            {missingSourceCount === 0 && <span style={{ color: '#3fb950', fontSize: 13 }}>All source QR packets received ✓</span>}
+          </div>
+          {recoveryRequest && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ ...S.row, justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ color: '#d29922', fontSize: 13 }}>
+                  Missing {recoveryMissingCount} source QR packets
+                </span>
+                <button type="button" style={S.btnSecondary} onClick={handleCopyRecoveryRequest}>
+                  {recoveryCopied ? 'Copied ✓' : 'Copy request'}
+                </button>
+              </div>
+              <textarea
+                aria-label="RaptorQ recovery request"
+                style={{ ...S.textarea, minHeight: 76, maxHeight: 160 }}
+                value={recoveryRequest}
+                readOnly
+              />
+              <p style={{ marginTop: 6, color: '#8b949e', fontSize: 12 }}>
+                Paste this request into the Enhanced Sender and start the same file again. Only missing source QR packets will loop.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

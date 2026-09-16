@@ -1,4 +1,5 @@
 export * from './fec/codec';
+export * from './fec/raptorq_recovery';
 export * from './protocol/constants';
 export * from './protocol/crc32c';
 export * from './protocol/packet';

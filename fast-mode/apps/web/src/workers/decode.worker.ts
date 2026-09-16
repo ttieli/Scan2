@@ -27,6 +27,13 @@ import { RaptorQWasmDecoder } from '@raptorqr/core/fec/raptorq_wasm';
 import { GenerationDecoder } from '@raptorqr/core/fec/rlnc_decoder';
 import { assemblePayload } from '@raptorqr/core/reconstruct/assemble';
 import { unwrapAndVerifyIntegrityEnvelope } from '@/lib/integrity_envelope';
+import {
+  buildRaptorQRecoveryRequest,
+  createRaptorQSourceProgress,
+  raptorQPayloadId,
+  raptorQSourceOrdinal,
+  sourceLayoutForRaptorQ,
+} from '@raptorqr/core/fec/raptorq_recovery';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -58,6 +65,11 @@ interface RlncDecodeState extends BaseDecodeState {
 interface RaptorQDecodeState extends BaseDecodeState {
   codec: 'wasm-raptorq';
   decoder: RaptorQWasmDecoder | null;
+  sourceTotal: number;
+  sourceReceived: number;
+  sourceReceivedIds: Set<string>;
+  sourceBucketReceived: number[];
+  sourceBucketTotals: number[];
 }
 
 type DecodeState = RlncDecodeState | RaptorQDecodeState;
@@ -94,6 +106,25 @@ self.onmessage = (e: MessageEvent) => {
   if (msg.type === 'settings') {
     decodeSettings = normalizeDecodeSettings(msg.settings);
     receiverFecCodec = normalizeReceiverFecCodec(msg.fecCodec);
+    return;
+  }
+
+  if (msg.type === 'recoveryRequest') {
+    if (!current || current.codec !== 'wasm-raptorq') {
+      self.postMessage({ type: 'error', message: 'Scan a RaptorQ transfer before generating a recovery request.' });
+      return;
+    }
+    const progress = createRaptorQSourceProgress(
+      current.sourceReceivedIds,
+      current.dataLength,
+      current.symbolSize,
+    );
+    self.postMessage({
+      type: 'recoveryRequest',
+      code: buildRaptorQRecoveryRequest(current.dataLength, current.symbolSize, progress.missingSourceIds),
+      missingCount: progress.missingSourceIds.length,
+      sourceTotal: progress.sourceTotal,
+    });
     return;
   }
 
@@ -315,6 +346,13 @@ async function processRaptorQPacket(
   if (!current) {
     const symbolSize = packet.payload.length;
     const sourceSymbols = Math.max(1, Math.ceil(h.dataLength / Math.max(1, symbolSize - 4)));
+    const sourceLayout = sourceLayoutForRaptorQ(h.dataLength, symbolSize);
+    const bucketCount = Math.max(1, Math.min(sourceLayout.totalSourceSymbols, 200));
+    const sourceBucketTotals = Array.from({ length: bucketCount }, (_, bucket) => {
+      const start = Math.floor(bucket * sourceLayout.totalSourceSymbols / bucketCount);
+      const end = Math.floor((bucket + 1) * sourceLayout.totalSourceSymbols / bucketCount);
+      return Math.max(1, end - start);
+    });
     current = {
       codec: 'wasm-raptorq',
       decoder: null,
@@ -328,6 +366,11 @@ async function processRaptorQPacket(
       isText: h.isText,
       isCompressed: h.compressed,
       completed: false,
+      sourceTotal: sourceLayout.totalSourceSymbols,
+      sourceReceived: 0,
+      sourceReceivedIds: new Set(),
+      sourceBucketReceived: sourceBucketTotals.map(() => 0),
+      sourceBucketTotals,
       stats: { totalFrames: 0, framesWithQR: 0, acceptedPackets: 0 },
     };
   }
@@ -366,6 +409,16 @@ async function processRaptorQPacket(
   current.dedup.add(dedupKey);
   current.stats.acceptedPackets++;
   current.receivedPackets++;
+  const sourceOrdinal = raptorQSourceOrdinal(packet.payload, current.dataLength, current.symbolSize);
+  if (sourceOrdinal !== null) {
+    current.sourceReceivedIds.add(dedupKey);
+    current.sourceReceived++;
+    const bucket = Math.min(
+      current.sourceBucketReceived.length - 1,
+      Math.floor(sourceOrdinal * current.sourceBucketReceived.length / current.sourceTotal),
+    );
+    current.sourceBucketReceived[bucket] = (current.sourceBucketReceived[bucket] ?? 0) + 1;
+  }
 
   try {
     if (!current.decoder) {
@@ -555,6 +608,15 @@ function reportProgress(state: DecodeState): void {
     symbolSize: state.symbolSize,
     qrVersion: state.qrVersion,
     fecCodec: state.codec,
+    sourceTotal: state.codec === 'wasm-raptorq' ? state.sourceTotal : state.sourceGenerations * K,
+    sourceReceived: state.codec === 'wasm-raptorq' ? state.sourceReceived : solvedGens * K,
+    repairReceived: state.codec === 'wasm-raptorq' ? Math.max(0, state.receivedPackets - state.sourceReceived) : 0,
+    sourceBuckets: state.codec === 'wasm-raptorq'
+      ? state.sourceBucketReceived.map((received, index) => ({
+          received,
+          total: state.sourceBucketTotals[index] ?? 0,
+        }))
+      : [],
     status: state.codec === 'wasm-raptorq'
       ? `Receiving RaptorQ (${uniquePackets}/${needed} packets)`
       : totalGens > 0
@@ -574,11 +636,4 @@ function reportCodecMismatch(codec: TransportCodec): void {
     type: 'error',
     message: `Received ${codec} packet while FEC codec is set to ${receiverFecCodec}.`,
   });
-}
-
-function raptorQPayloadId(payload: Uint8Array): string {
-  if (payload.length < 4) {
-    throw new Error('RaptorQ packet payload is too short for a payload id.');
-  }
-  return `${payload[0]}:${payload[1]}:${payload[2]}:${payload[3]}`;
 }

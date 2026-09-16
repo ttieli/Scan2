@@ -11373,6 +11373,8 @@ async function testFastStandaloneArtifacts(id) {
         requireCondition(senderHtml.includes("location.hash = 'sender'"), '增强发送端默认模式错误');
         requireCondition(receiverHtml.includes("location.hash = 'receiver'"), '增强接收端默认模式错误');
         requireCondition(senderHtml.length > 1000000 && receiverHtml.length > 1000000, 'WASM/Worker 未内嵌到增强页面');
+        requireCondition(receiverHtml.includes('RaptorQ Progress') && receiverHtml.includes('Generate missing-only recovery request'), '增强接收端缺少进度框或补扫请求入口');
+        requireCondition(senderHtml.includes('Missing-only recovery request'), '增强发送端缺少定向补扫输入');
     });
 }
 

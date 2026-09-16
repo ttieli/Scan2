@@ -49,6 +49,7 @@ import {
 import { QrWorkerPool } from '@/lib/qr_worker_pool';
 import EncodeWorker from '@/workers/encode.worker.ts?worker&inline';
 import GifWorker from '@/workers/gif.worker.ts?worker&inline';
+import { selectRaptorQRecoveryPacketIndices } from '@raptorqr/core/fec/raptorq_recovery';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ interface LiveTransfer {
   scale: number;
   displayFrameCount: number;
   parallelCount: ParallelQRCount;
+  recoveryPacketCount: number | null;
 }
 
 interface RenderedTile {
@@ -295,6 +297,7 @@ export function SenderPage() {
   const [renderReadyPackets, setRenderReadyPackets] = useState(0);
   const [renderPendingPackets, setRenderPendingPackets] = useState(0);
   const [parallelQRCount, setParallelQRCount] = useState<ParallelQRCount>(DEFAULT_PARALLEL_QR_COUNT);
+  const [recoveryRequestInput, setRecoveryRequestInput] = useState('');
   const [liveTransfer, setLiveTransfer] = useState<LiveTransfer | null>(null);
   const [gifResult, setGifResult] = useState<GifResult | null>(null);
   const [stats, setStats] = useState<{
@@ -859,11 +862,12 @@ export function SenderPage() {
         fecCodec === 'wasm-raptorq' ? raptorqPlaybackStrategy : null,
         encoded.sourcePacketIndices,
         encoded.repairPacketIndices,
+        recoveryRequestInput,
       );
       setLiveTransfer(nextLiveTransfer);
-      setStatus(
-        `Encoded ${encoded.stats.frameCount} packets. Rendering first QR frame…`,
-      );
+      setStatus(nextLiveTransfer.recoveryPacketCount === null
+        ? `Encoded ${encoded.stats.frameCount} packets. Rendering first QR frame…`
+        : `Missing-only recovery loop: ${nextLiveTransfer.recoveryPacketCount} source QR packets.`);
     } catch (err: any) {
       if (runId === runIdRef.current) {
         setError(err.message ?? String(err));
@@ -890,6 +894,7 @@ export function SenderPage() {
     fecCodec,
     raptorqRepairPercent,
     raptorqPlaybackStrategy,
+    recoveryRequestInput,
     parallelQRCount,
   ]);
 
@@ -1222,6 +1227,27 @@ export function SenderPage() {
           </select>
           {parallelQRCount === 4 && <div style={S.warn}>4 QR is the large-screen speed profile. Use 1 or 2 when recognition becomes unstable.</div>}
         </div>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ ...S.row, justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <span style={S.label}>Missing-only recovery request</span>
+            {recoveryRequestInput && (
+              <button type="button" style={S.btnSecondary} onClick={() => setRecoveryRequestInput('')}>
+                Clear
+              </button>
+            )}
+          </div>
+          <textarea
+            aria-label="RaptorQ recovery request"
+            style={{ ...S.textarea, minHeight: 76, maxHeight: 150 }}
+            value={recoveryRequestInput}
+            disabled={encodingLive}
+            placeholder="Paste the RQ1 request copied from Enhanced Receiver. Leave empty for normal playback."
+            onInput={(event) => setRecoveryRequestInput((event.target as HTMLTextAreaElement).value.trim())}
+          />
+          <p style={{ marginTop: 6, color: '#8b949e', fontSize: 12 }}>
+            Select the same file and settings. When a request is present, only the missing source QR packets will loop.
+          </p>
+        </div>
         <div style={S.row}>
           <button
             style={encodingLive ? { ...S.btn, opacity: 0.6, cursor: 'not-allowed' } : S.btn}
@@ -1455,6 +1481,7 @@ function createLiveTransfer(
   raptorqStrategy: RaptorQPlaybackStrategy | null,
   sourcePacketIndices?: number[],
   repairPacketIndices?: number[],
+  recoveryRequest = '',
 ): LiveTransfer {
   if (packets.length === 0) {
     throw new Error('No QR packets were generated.');
@@ -1483,6 +1510,16 @@ function createLiveTransfer(
     };
   }
 
+  let recoveryPacketCount: number | null = null;
+  const normalizedRecoveryRequest = recoveryRequest.trim();
+  if (normalizedRecoveryRequest) {
+    if (!raptorqStrategy) throw new Error('Missing-only recovery requests require the RaptorQ codec.');
+    const recoveryPacketIndexes = selectRaptorQRecoveryPacketIndices(packets, normalizedRecoveryRequest);
+    if (recoveryPacketIndexes.length === 0) throw new Error('The recovery request contains no missing source QR packets.');
+    playbackOrders = { initialOrder: recoveryPacketIndexes, loopOrder: recoveryPacketIndexes };
+    recoveryPacketCount = recoveryPacketIndexes.length;
+  }
+
   return {
     packets,
     ...playbackOrders,
@@ -1498,8 +1535,9 @@ function createLiveTransfer(
     qrEncoder,
     symbolSize: profile.maxPayloadSize,
     scale,
-    displayFrameCount: stripedFrameCount(packets.length, parallelCount),
+    displayFrameCount: stripedFrameCount(playbackOrders.initialOrder.length, parallelCount),
     parallelCount,
+    recoveryPacketCount,
   };
 }
 
