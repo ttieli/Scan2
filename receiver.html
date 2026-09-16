@@ -10869,6 +10869,84 @@ function hasReceivedBit(bits, index) { return (bits[index >> 3] & (1 << (index &
 function markReceivedBit(bits, index) { const fresh = !hasReceivedBit(bits,index); bits[index >> 3] |= 1 << (index & 7); return fresh; }
 function listReceivedBits(bits, total) { const result=[]; for(let i=0;i<total;i++) if(hasReceivedBit(bits,i)) result.push(i); return result; }
 
+const UNIFORM_V3_MAGIC = 'Q3F';
+const UNIFORM_V3_HEADER_BYTES = 37;
+const UNIFORM_V3_MAX_OBJECT_BYTES = 21 * 1024 * 1024;
+
+function base64UrlToBytesV3(value) {
+    if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('invalid-base64url');
+    const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+}
+
+function parseUniformV3Packet(value) {
+    if (typeof value !== 'string' || value.length <= UNIFORM_V3_HEADER_BYTES || !value.startsWith(UNIFORM_V3_MAGIC)) {
+        return { ok:false, reason:'format' };
+    }
+    const id = value.slice(3, 19);
+    const indexText = value.slice(19, 24);
+    const totalText = value.slice(24, 29);
+    const lengthText = value.slice(29, 37);
+    if (!/^[0-9a-f]{16}$/.test(id) || !/^[0-9a-z]{5}$/.test(indexText) ||
+        !/^[0-9a-z]{5}$/.test(totalText) || !/^[0-9a-z]{8}$/.test(lengthText)) {
+        return { ok:false, reason:'header' };
+    }
+    const index = parseInt(indexText, 36);
+    const total = parseInt(totalText, 36);
+    const objectLength = parseInt(lengthText, 36);
+    if (!Number.isSafeInteger(index) || !Number.isSafeInteger(total) || !Number.isSafeInteger(objectLength) ||
+        total < 1 || index < 0 || index >= total || objectLength < 4 || objectLength > UNIFORM_V3_MAX_OBJECT_BYTES) return { ok:false, reason:'range' };
+    try {
+        const bytes = base64UrlToBytesV3(value.slice(UNIFORM_V3_HEADER_BYTES));
+        if (bytes.length < 1 || objectLength > total * bytes.length || objectLength <= (total - 1) * bytes.length) {
+            return { ok:false, reason:'length' };
+        }
+        return { ok:true, packet:{version:3,id:id,index:index,total:total,objectLength:objectLength,
+            rawChunkSize:bytes.length,data:value.slice(UNIFORM_V3_HEADER_BYTES)} };
+    } catch (error) {
+        return { ok:false, reason:'payload' };
+    }
+}
+
+function createV3State(packet) {
+    const now = Date.now();
+    const storageMode = packet.total > 2000 ? 'idb' : 'memory';
+    return {version:3,id:packet.id,kind:'f',total:packet.total,objectLength:packet.objectLength,
+        rawChunkSize:packet.rawChunkSize,fragments:storageMode==='memory'?{}:null,
+        receivedBits:createReceivedBits(packet.total),receivedCount:0,storageMode:storageMode,
+        progressBuckets:new Uint32Array(Math.min(packet.total,200)),metadata:null,createdAt:now,updatedAt:now,
+        status:'receiving',downloadAllowed:false};
+}
+
+function acceptV3Payload(value) {
+    const parsed = parseUniformV3Packet(value);
+    if (!parsed.ok) return {accepted:false,reason:parsed.reason};
+    const packet = parsed.packet;
+    if (!activeTransfer) activeTransfer = createV3State(packet);
+    if (activeTransfer.version !== 3 || activeTransfer.id !== packet.id || activeTransfer.total !== packet.total ||
+        activeTransfer.objectLength !== packet.objectLength || activeTransfer.rawChunkSize !== packet.rawChunkSize) {
+        return {accepted:false,reason:'other-transfer'};
+    }
+    if (activeTransfer.status === 'persistence-error') return {accepted:false,reason:'persistence-error'};
+    if (activeTransfer.storageMode === 'idb' && largePendingWrites >= 50) return {accepted:false,reason:'persistence-backpressure'};
+    const duplicate = hasReceivedBit(activeTransfer.receivedBits, packet.index);
+    if (!duplicate) {
+        markReceivedBit(activeTransfer.receivedBits, packet.index);
+        activeTransfer.receivedCount++;
+        const bucket=Math.min(activeTransfer.progressBuckets.length-1,Math.floor(packet.index*activeTransfer.progressBuckets.length/activeTransfer.total));
+        activeTransfer.progressBuckets[bucket]++;
+        if (activeTransfer.storageMode === 'memory') activeTransfer.fragments[packet.index]=packet.data;
+        else enqueueLargeFragmentWrite(activeTransfer.id,packet.index,packet.data);
+    }
+    activeTransfer.updatedAt=Date.now(); activeTransfer.status='receiving'; activeTransfer.downloadAllowed=false;
+    v2VerifiedResult=null; saveV2Session();
+    return {accepted:true,duplicate:duplicate,index:packet.index};
+}
+
 function createV2State(fragment) {
     const now = Date.now();
     return {
@@ -10893,7 +10971,7 @@ function saveV2Session() {
     if (!activeTransfer) return;
     try {
         if (activeTransfer.storageMode === 'idb') {
-            localStorage.setItem(V2_SESSION_KEY, JSON.stringify({version:2,id:activeTransfer.id,kind:activeTransfer.kind,total:activeTransfer.total,metadata:activeTransfer.metadata,createdAt:activeTransfer.createdAt,updatedAt:activeTransfer.updatedAt,status:activeTransfer.status,storageMode:'idb',receivedCount:activeTransfer.receivedCount,receivedBits:bitsetToBase64(activeTransfer.receivedBits)}));
+            localStorage.setItem(V2_SESSION_KEY, JSON.stringify({version:activeTransfer.version,id:activeTransfer.id,kind:activeTransfer.kind,total:activeTransfer.total,metadata:activeTransfer.metadata,createdAt:activeTransfer.createdAt,updatedAt:activeTransfer.updatedAt,status:activeTransfer.status,storageMode:'idb',receivedCount:activeTransfer.receivedCount,receivedBits:bitsetToBase64(activeTransfer.receivedBits),objectLength:activeTransfer.objectLength,rawChunkSize:activeTransfer.rawChunkSize}));
         } else {
             localStorage.setItem(V2_SESSION_KEY, JSON.stringify(activeTransfer));
         }
@@ -10909,7 +10987,7 @@ function acceptV2Fragment(fragment) {
     if (!validation.ok) return { accepted: false, reason: validation.reason };
 
     if (!activeTransfer) activeTransfer = createV2State(fragment);
-    if (activeTransfer.id !== fragment.x || activeTransfer.kind !== fragment.k || activeTransfer.total !== fragment.t) {
+    if (activeTransfer.version !== 2 || activeTransfer.id !== fragment.x || activeTransfer.kind !== fragment.k || activeTransfer.total !== fragment.t) {
         return { accepted: false, reason: 'other-transfer' };
     }
     if (activeTransfer.status === 'persistence-error') return {accepted:false,reason:'persistence-error'};
@@ -10953,16 +11031,22 @@ function exportV2Session() {
 }
 
 function validateStoredV2Session(session) {
-    if (!session || session.version !== 2 || !/^[0-9a-f]{16}$/.test(session.id || '') ||
-        (session.kind !== 't' && session.kind !== 'f') || !Number.isInteger(session.total) || session.total < 2 ||
+    if (!session || (session.version !== 2 && session.version !== 3) || !/^[0-9a-f]{16}$/.test(session.id || '') ||
+        (session.kind !== 't' && session.kind !== 'f') || !Number.isInteger(session.total) || session.total < (session.version === 3 ? 1 : 2) ||
         (session.storageMode !== 'idb' && (!session.fragments || typeof session.fragments !== 'object' || Array.isArray(session.fragments))) ||
         !Number.isFinite(session.createdAt) || Date.now() - session.createdAt > 24 * 60 * 60 * 1000) return false;
     for (const key of Object.keys(session.fragments || {})) {
         const index = Number(key);
         if (!Number.isInteger(index) || index < 0 || index >= session.total || typeof session.fragments[key] !== 'string') return false;
     }
-    if (session.metadata !== null && !isValidV2Metadata(session.kind, session.metadata)) return false;
-    if (session.fragments && Object.prototype.hasOwnProperty.call(session.fragments, 0) && !session.metadata) return false;
+    if (session.version === 3) {
+        if (session.kind !== 'f' || !Number.isInteger(session.objectLength) || session.objectLength < 4 ||
+            session.objectLength > UNIFORM_V3_MAX_OBJECT_BYTES || !Number.isInteger(session.rawChunkSize) || session.rawChunkSize < 1 ||
+            (session.metadata !== null && !isValidV2Metadata('f', session.metadata))) return false;
+    } else {
+        if (session.metadata !== null && !isValidV2Metadata(session.kind, session.metadata)) return false;
+        if (session.fragments && Object.prototype.hasOwnProperty.call(session.fragments, 0) && !session.metadata) return false;
+    }
     return true;
 }
 
@@ -11070,6 +11154,51 @@ async function verifyV2Transfer() {
     return { ok: true, kind: activeTransfer.kind, text: text, bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
 }
 
+async function verifyV3Transfer() {
+    if (!activeTransfer || activeTransfer.version !== 3) return {ok:false,reason:'v3-session-missing'};
+    if (activeTransfer.receivedCount !== activeTransfer.total) return {ok:false,reason:'fragment-missing'};
+    let rows;
+    if (activeTransfer.storageMode === 'idb') {
+        await flushLargeFragmentWrites();
+        rows = await getLargeFragments(activeTransfer.id);
+        if (rows.length !== activeTransfer.total) return {ok:false,reason:'fragment-missing'};
+    } else {
+        rows = [];
+        for (let index=0; index<activeTransfer.total; index++) {
+            if (typeof activeTransfer.fragments[index] !== 'string') return {ok:false,reason:'fragment-missing'};
+            rows.push({index:index,data:activeTransfer.fragments[index]});
+        }
+    }
+    try {
+        const padded = new Uint8Array(activeTransfer.total * activeTransfer.rawChunkSize);
+        rows.sort(function(a,b){return a.index-b.index;}).forEach(function(row) {
+            const chunk = base64UrlToBytesV3(row.data);
+            if (chunk.length !== activeTransfer.rawChunkSize) throw new Error('chunk-size');
+            padded.set(chunk, row.index * activeTransfer.rawChunkSize);
+        });
+        const objectBytes = padded.slice(0, activeTransfer.objectLength);
+        const metadataLength = new DataView(objectBytes.buffer, objectBytes.byteOffset, objectBytes.byteLength).getUint32(0, false);
+        if (metadataLength < 2 || 4 + metadataLength > objectBytes.length) throw new Error('metadata-length');
+        const metadataText = new TextDecoder('utf-8', {fatal:true}).decode(objectBytes.slice(4, 4 + metadataLength));
+        const metadata = JSON.parse(metadataText);
+        if (!isValidV2Metadata('f', metadata)) throw new Error('metadata-invalid');
+        const bytes = objectBytes.slice(4 + metadataLength);
+        if (bytes.length !== metadata.s) throw new Error('size-mismatch');
+        if (await sha256HexV2(bytes) !== metadata.h) throw new Error('hash-mismatch');
+        activeTransfer.metadata = metadata;
+        activeTransfer.status = 'complete';
+        activeTransfer.downloadAllowed = true;
+        v2VerifiedResult = {ok:true,kind:'f',text:null,bytes:bytes};
+        saveV2Session();
+        return {ok:true,kind:'f',metadata:JSON.parse(JSON.stringify(metadata)),
+            bytes:bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)};
+    } catch (error) {
+        activeTransfer.status='damaged'; activeTransfer.downloadAllowed=false; v2VerifiedResult=null;
+        const reason = error && error.message ? error.message : 'v3-invalid';
+        return {ok:false,reason:reason};
+    }
+}
+
 function resetV2State() {
     const oldId = activeTransfer && activeTransfer.storageMode === 'idb' ? activeTransfer.id : null;
     activeTransfer = null;
@@ -11082,8 +11211,9 @@ function resetV2State() {
 async function finalizeV2Transfer() {
     if (!activeTransfer || v2VerificationInProgress) return;
     v2VerificationInProgress = true;
-    const result = await verifyV2Transfer();
-    v2VerificationInProgress = false;
+    let result;
+    try { result = await verifyV2Transfer(); }
+    finally { v2VerificationInProgress = false; }
 
     if (!result.ok) {
         activeTransfer.status = 'damaged';
@@ -11160,6 +11290,45 @@ function handleV2Fragment(fragment) {
             updateScanProgress('❌ 完成校验异常', receivedCount, activeTransfer.total);
         });
     }
+    return result;
+}
+
+async function finalizeV3Transfer() {
+    if (!activeTransfer || v2VerificationInProgress) return;
+    v2VerificationInProgress = true;
+    let result;
+    try { result = await verifyV3Transfer(); }
+    finally { v2VerificationInProgress = false; }
+    if (!result.ok) {
+        const errorDiv=document.getElementById('checksumError'); if(errorDiv)errorDiv.style.display='block';
+        document.getElementById('downloadBtn').disabled=true;
+        updateScanProgress('❌ V3 文件校验失败: '+result.reason,activeTransfer.receivedCount,activeTransfer.total);
+        scanning=false; stopScan(); setState('complete'); return;
+    }
+    document.getElementById('file-download-section').style.display='block';
+    document.getElementById('downloadFileName').textContent=result.metadata.n;
+    document.getElementById('downloadFileSize').textContent=formatBytes(result.metadata.s);
+    document.getElementById('downloadFileType').textContent=result.metadata.y;
+    document.getElementById('fileProgressText').textContent=activeTransfer.total+' / '+activeTransfer.total+' · SHA-256 ✓';
+    configureFileActions();
+    updateScanProgress('✅ V3 扫描与校验完成！',activeTransfer.total,activeTransfer.total);
+    scanning=false; stopScan(); setState('complete');
+}
+
+function handleV3Payload(value) {
+    const result=acceptV3Payload(value);
+    if(!result.accepted){
+        updateScanProgress(result.reason==='other-transfer'?'⚠️ 检测到其他传输，请先重新开始':'⚠️ 已忽略无效 V3 片段: '+result.reason,
+            activeTransfer?activeTransfer.receivedCount:0,activeTransfer?activeTransfer.total:0);
+        return result;
+    }
+    const receivedCount=activeTransfer.receivedCount;
+    updateV2ProgressMap(activeTransfer,result.index); updateProgressBar(receivedCount,activeTransfer.total);
+    const missing=document.getElementById('missingFragmentsSection'); if(missing)missing.style.display='block';
+    const last=document.getElementById('lastScannedInfo'); if(last)last.textContent=result.duplicate?`最后扫描: #${result.index+1} (重复)`:`最后扫描: #${result.index+1} ✓ 新`;
+    updateScanProgress(`📁 接收均匀文件中: ${receivedCount}/${activeTransfer.total}`,receivedCount,activeTransfer.total);
+    document.getElementById('output').textContent=`正在接收均匀文件 ${receivedCount}/${activeTransfer.total} · 完成后解析元数据`;
+    if(receivedCount===activeTransfer.total){finalizeV3Transfer().catch(function(error){console.error('V3完成校验失败',error);});}
     return result;
 }
 
@@ -11729,6 +11898,8 @@ function checkSessionRecovery() {
             const count = activeTransfer.receivedCount;
             if (activeTransfer.kind === 'f' && activeTransfer.metadata) {
                 detail.textContent = activeTransfer.metadata.n + ' — ' + count + '/' + activeTransfer.total + ' 片';
+            } else if (activeTransfer.version === 3) {
+                detail.textContent = 'V3 均匀文件 — 已接收 ' + count + '/' + activeTransfer.total + ' 片';
             } else if (!activeTransfer.metadata) {
                 detail.textContent = '等待第1片 — 已接收 ' + count + '/' + activeTransfer.total + ' 片';
             } else {
@@ -11796,6 +11967,8 @@ async function continueSession() {
             document.getElementById('downloadFileSize').textContent = formatBytes(activeTransfer.metadata.s);
             document.getElementById('downloadFileType').textContent = activeTransfer.metadata.y;
             document.getElementById('fileProgressText').textContent = `${receivedCount} / ${total}`;
+        } else if (activeTransfer.version === 3) {
+            document.getElementById('output').textContent = `继续接收均匀文件 ${receivedCount}/${total}`;
         } else {
             document.getElementById('output').textContent = activeTransfer.metadata
                 ? `继续接收私有文本 ${receivedCount}/${total}`
@@ -12027,18 +12200,27 @@ function scan() {
             }
             // 解析 QR 数据
             let data;
+            let handledV3 = false;
             try {
                 // Strip UTF-8 BOM that QRCode.js adds for non-ASCII content
                 let rawData = code.data;
                 if (rawData.charCodeAt(0) === 0xFEFF) {
                     rawData = rawData.substring(1);
                 }
-                data = JSON.parse(rawData);
+                if (rawData.startsWith(UNIFORM_V3_MAGIC)) {
+                    handleV3Payload(rawData);
+                    handledV3 = true;
+                    data = null;
+                } else {
+                    data = JSON.parse(rawData);
+                }
             } catch (e) {
                 // JSON解析失败，显示原始数据
                 console.log('JSON解析失败，显示原始数据:', code.data);
-                document.getElementById('output').textContent = code.data;
-                document.getElementById('copyBtn').style.display = 'block';
+                if (!handledV3) {
+                    document.getElementById('output').textContent = code.data;
+                    document.getElementById('copyBtn').style.display = 'block';
+                }
                 data = null;
             }
 
@@ -12142,6 +12324,10 @@ if (new URLSearchParams(window.location.search).get('test') === '1') {
         exportSession: exportV2Session,
         restore: restoreV2Session,
         verify: verifyV2Transfer,
+        resetV3: resetV2State,
+        parseV3Payload: parseUniformV3Packet,
+        acceptV3Payload: acceptV3Payload,
+        verifyV3: verifyV3Transfer,
         handle: handleV2Fragment,
         uiSnapshot: function() {
             return {

@@ -10466,6 +10466,9 @@ const tests = [
     { id: 'T33', name: '接收位图O(1)计数与聚合进度', type: 'large' },
     { id: 'T34', name: 'IndexedDB大文件片段恢复清理', type: 'large' },
     { id: 'T35', name: '超限文件读取前拒绝', type: 'large' },
+    { id: 'T36', name: '经典 V3 文件二维码密度均匀', type: 'v3' },
+    { id: 'T37', name: '经典 V3 乱序往返与 SHA 阻断', type: 'v3' },
+    { id: 'T38', name: '增强发送与接收页面单文件自包含', type: 'fast' },
 ];
 
 // Render test list
@@ -11283,6 +11286,96 @@ async function testFileLimitBeforeRead(id) {
     });
 }
 
+async function testUniformFileV3(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        requireCondition(sender && sender.buildUniformFileTransfer, '均匀 V3 发送 API 尚未实现');
+        const bytes = new Uint8Array(2048);
+        crypto.getRandomValues(bytes);
+        const transfer = await sender.buildUniformFileTransfer(
+            bytes,
+            '一份信息密度必须和其他图片一致的文件名.pdf',
+            'application/pdf',
+            'H'
+        );
+        requireCondition(transfer.source.length > 3, 'V3 分片数量不足');
+        const payloads = [
+            transfer.source.getData(0),
+            transfer.source.getData(Math.floor(transfer.source.length / 2)),
+            transfer.source.getData(transfer.source.length - 1)
+        ];
+        requireCondition(payloads.every(function(payload) { return payload.startsWith('Q3F'); }), 'V3 magic 错误');
+        const lengths = payloads.map(function(payload) { return new TextEncoder().encode(payload).length; });
+        requireCondition(lengths.every(function(length) { return length === lengths[0]; }), '首中末片载荷长度不一致');
+        payloads.forEach(function(payload) {
+            const decoded = encodeAndDecode(payload, 'H');
+            requireCondition(decoded.success && decoded.data === payload, 'V3 QR 编解码失败');
+        });
+    });
+}
+
+async function testUniformFileV3Roundtrip(id) {
+    return runProductionTest(id, async function() {
+        const sender = getProductionAPI('sender');
+        const receiver = getProductionAPI('receiver');
+        requireCondition(sender && sender.buildUniformFileTransfer, '均匀 V3 发送 API 尚未实现');
+        requireCondition(receiver && receiver.acceptV3Payload && receiver.verifyV3, '均匀 V3 接收 API 尚未实现');
+        const bytes = new Uint8Array(3072);
+        crypto.getRandomValues(bytes);
+        const transfer = await sender.buildUniformFileTransfer(bytes, '乱序文件.bin', 'application/octet-stream', 'M');
+        const payloads = [];
+        for (let index = 0; index < transfer.source.length; index++) payloads.push(transfer.source.getData(index));
+
+        receiver.resetV3();
+        payloads.slice().reverse().forEach(function(payload) { receiver.acceptV3Payload(payload); });
+        const result = await receiver.verifyV3();
+        requireCondition(result.ok, 'V3 文件验证失败: ' + (result.reason || 'unknown'));
+        requireCondition(arraysEqual(new Uint8Array(result.bytes), bytes), 'V3 文件字节不一致');
+        requireCondition(result.metadata.n === '乱序文件.bin', 'V3 文件名恢复失败');
+
+        receiver.resetV3();
+        receiver.acceptV3Payload(payloads[0]);
+        const mixedVersion = receiver.accept({
+            v:2,k:'f',x:transfer.id,i:0,t:transfer.source.length,d:'',m:transfer.metadata
+        });
+        requireCondition(!mixedVersion.accepted && mixedVersion.reason === 'other-transfer', 'V2 片段混入了活动 V3 会话');
+
+        const damaged = payloads.slice();
+        const last = damaged[damaged.length - 1];
+        const bodyOffset = 37;
+        const replacementOffset = Math.min(last.length - 1, bodyOffset + 3);
+        damaged[damaged.length - 1] = last.slice(0, replacementOffset) +
+            (last[replacementOffset] === 'A' ? 'B' : 'A') + last.slice(replacementOffset + 1);
+        receiver.resetV3();
+        damaged.forEach(function(payload) { receiver.acceptV3Payload(payload); });
+        const damagedResult = await receiver.verifyV3();
+        requireCondition(!damagedResult.ok, 'V3 损坏文件未被拒绝');
+
+        const restored = JSON.parse(receiver.exportSession());
+        restored.metadata = {n:7,y:'text/plain',s:0,h:'0'.repeat(64)};
+        receiver.resetV3();
+        requireCondition(receiver.restore(JSON.stringify(restored)) === false, 'V3 恢复接受了非法元数据');
+    });
+}
+
+async function testFastStandaloneArtifacts(id) {
+    return runProductionTest(id, async function() {
+        const senderResponse = await fetch('sender-fast.html', {cache:'no-store'});
+        const receiverResponse = await fetch('receiver-fast.html', {cache:'no-store'});
+        requireCondition(senderResponse.ok && receiverResponse.ok, '增强页面尚未生成');
+        const senderHtml = await senderResponse.text();
+        const receiverHtml = await receiverResponse.text();
+        const parser = new DOMParser();
+        const senderDoc = parser.parseFromString(senderHtml, 'text/html');
+        const receiverDoc = parser.parseFromString(receiverHtml, 'text/html');
+        requireCondition(senderDoc.querySelectorAll('script[src],link[href]').length === 0, '增强发送端仍有外部运行时引用');
+        requireCondition(receiverDoc.querySelectorAll('script[src],link[href]').length === 0, '增强接收端仍有外部运行时引用');
+        requireCondition(senderHtml.includes("location.hash = 'sender'"), '增强发送端默认模式错误');
+        requireCondition(receiverHtml.includes("location.hash = 'receiver'"), '增强接收端默认模式错误');
+        requireCondition(senderHtml.length > 1000000 && receiverHtml.length > 1000000, 'WASM/Worker 未内嵌到增强页面');
+    });
+}
+
 // ============================================================
 // Main test runner
 // ============================================================
@@ -11371,6 +11464,9 @@ async function runAllTests() {
                     case 'T33': ok = await testReceiverBitsetAndProgress('T33'); break;
                     case 'T34': ok = await testIndexedDBLargeStore('T34'); break;
                     case 'T35': ok = await testFileLimitBeforeRead('T35'); break;
+                    case 'T36': ok = await testUniformFileV3('T36'); break;
+                    case 'T37': ok = await testUniformFileV3Roundtrip('T37'); break;
+                    case 'T38': ok = await testFastStandaloneArtifacts('T38'); break;
                 }
                 if (ok) passed++;
                 resolve();

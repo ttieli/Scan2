@@ -87,6 +87,18 @@
             margin-bottom: 48px;
         }
 
+        .mode-label {
+            margin: 28px 4px 12px;
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .card.fast { border: 1px solid rgba(48,209,88,0.35); }
+        .card.fast .card-icon { background: rgba(48,209,88,0.12); }
+
         .card {
             background: var(--bg-card);
             border: none;
@@ -250,9 +262,10 @@
             <p class="subtitle">
                 <span data-zh="无需网络，通过二维码在设备间传输数据" data-en="Transfer data between devices via QR codes — no network needed"></span>
             </p>
-            <div style="margin-top: 12px;"><span class="badge">v2.3 &nbsp;Offline</span></div>
+            <div style="margin-top: 12px;"><span class="badge">v3 &nbsp;Classic + Enhanced</span></div>
         </div>
 
+        <div class="mode-label" data-zh="经典传输 · 稳定兼容" data-en="Classic · Stable and compatible">经典传输 · 稳定兼容</div>
         <div class="cards">
             <a class="card" href="sender.html">
                 <div class="card-icon send">📤</div>
@@ -274,6 +287,27 @@
                 <span class="tag t1" data-zh="自动识别" data-en="Auto-detect"></span>
                 <span class="tag t2" data-zh="完整性校验" data-en="Checksum"></span>
                 <span class="tag t3" data-zh="断点续传" data-en="Resumable"></span>
+            </a>
+        </div>
+
+        <div class="mode-label" data-zh="增强传输 · RaptorQ 高速恢复" data-en="Enhanced · RaptorQ high-speed recovery">增强传输 · RaptorQ 高速恢复</div>
+        <div class="cards">
+            <a class="card fast" href="sender-fast.html">
+                <div class="card-icon send">⚡</div>
+                <h2 data-zh="增强发送端" data-en="Enhanced Sender">增强发送端</h2>
+                <p><span data-zh="RaptorQ 喷泉码与 1/2/4 二维码并行播放；默认双码，不再依赖固定缺片重传" data-en="RaptorQ fountain coding with 1/2/4 parallel QR playback; dual QR by default"></span></p>
+                <span class="tag" data-zh="默认双码" data-en="Dual QR default"></span>
+                <span class="tag">RaptorQ</span>
+                <span class="tag">CRC32C</span>
+            </a>
+
+            <a class="card fast" href="receiver-fast.html">
+                <div class="card-icon recv">🛡️</div>
+                <h2 data-zh="增强接收端" data-en="Enhanced Receiver">增强接收端</h2>
+                <p><span data-zh="多码识别、前后摄像头、丢包恢复、逐包 CRC 与最终 SHA-256 校验" data-en="Multi-code scanning, front/rear cameras, loss recovery, CRC and final SHA-256 verification"></span></p>
+                <span class="tag" data-zh="前后摄像头" data-en="Front / rear camera"></span>
+                <span class="tag" data-zh="丢包恢复" data-en="Loss recovery"></span>
+                <span class="tag">SHA-256</span>
             </a>
         </div>
 

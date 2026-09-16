@@ -559,6 +559,10 @@ const NORMAL_FILE_MAX_BYTES = 5 * 1024 * 1024;
 const ABSOLUTE_FILE_MAX_BYTES = 20 * 1024 * 1024;
 const GRID_PAGE_SIZE = 12;
 const QR_CACHE_LIMIT = 8;
+const UNIFORM_V3_MAGIC = 'Q3F';
+const UNIFORM_V3_HEADER_BYTES = 37;
+const UNIFORM_V3_INDEX_WIDTH = 5;
+const UNIFORM_V3_LENGTH_WIDTH = 8;
 
 function getFilePolicy(size, selectedLevel) {
     if (!Number.isFinite(size) || size < 0 || size > ABSOLUTE_FILE_MAX_BYTES) {
@@ -592,6 +596,59 @@ function createLazyV2FileSource(base64Data, transferId, metadata, errorLevel) {
             if (index === 0) return JSON.stringify({ v:2, k:'f', x:transferId, i:0, t:layout.total, d:'', m:metadata });
             const start = (index - 1) * layout.chunkSize;
             return JSON.stringify({ v:2, k:'f', x:transferId, i:index, t:layout.total, d:base64Data.slice(start, start + layout.chunkSize) });
+        }
+    };
+}
+
+function toFixedBase36(value, width) {
+    if (!Number.isSafeInteger(value) || value < 0) throw new RangeError('base36-value');
+    const encoded = value.toString(36);
+    if (encoded.length > width) throw new RangeError('base36-overflow');
+    return encoded.padStart(width, '0');
+}
+
+function bytesToBase64Url(bytes) {
+    const normalized = new Uint8Array(bytes);
+    let binary = '';
+    for (let offset = 0; offset < normalized.length; offset += 0x8000) {
+        binary += String.fromCharCode.apply(null, normalized.subarray(offset, offset + 0x8000));
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function calculateUniformV3Layout(objectByteLength, errorLevel) {
+    const capacity = PRIVATE_QR_V10_CAPACITY[errorLevel] || PRIVATE_QR_V10_CAPACITY.H;
+    const encodedBudget = capacity - UNIFORM_V3_HEADER_BYTES;
+    const rawChunkSize = Math.floor(encodedBudget / 4) * 3;
+    if (rawChunkSize < 3) throw new Error('V3 分片无法装入目标二维码容量');
+    const total = Math.max(1, Math.ceil(objectByteLength / rawChunkSize));
+    if (total >= Math.pow(36, UNIFORM_V3_INDEX_WIDTH)) throw new Error('V3 分片数量超出上限');
+    return { rawChunkSize: rawChunkSize, total: total, payloadLength: Math.ceil(rawChunkSize / 3) * 4 };
+}
+
+function createUniformV3FileSource(objectBytes, transferId, errorLevel) {
+    const normalized = new Uint8Array(objectBytes);
+    const layout = calculateUniformV3Layout(normalized.length, errorLevel);
+    let payloadCalls = 0;
+    return {
+        kind: 'f', version: 3, id: transferId, length: layout.total,
+        objectByteLength: normalized.length, rawChunkSize: layout.rawChunkSize, materializedCount: 0,
+        get payloadCalls() { return payloadCalls; },
+        getData: function(index) {
+            if (!Number.isInteger(index) || index < 0 || index >= layout.total) throw new RangeError('fragment-index');
+            payloadCalls++;
+            const padded = new Uint8Array(layout.rawChunkSize);
+            const start = index * layout.rawChunkSize;
+            padded.set(normalized.subarray(start, Math.min(normalized.length, start + layout.rawChunkSize)));
+            const header = UNIFORM_V3_MAGIC + transferId +
+                toFixedBase36(index, UNIFORM_V3_INDEX_WIDTH) +
+                toFixedBase36(layout.total, UNIFORM_V3_INDEX_WIDTH) +
+                toFixedBase36(normalized.length, UNIFORM_V3_LENGTH_WIDTH);
+            const payload = header + bytesToBase64Url(padded);
+            if (utf8ByteLength(payload) > (PRIVATE_QR_V10_CAPACITY[errorLevel] || PRIVATE_QR_V10_CAPACITY.H)) {
+                throw new Error('V3 载荷超过目标二维码容量');
+            }
+            return payload;
         }
     };
 }
@@ -738,6 +795,23 @@ async function buildLazyFileTransfer(bytes, fileName, mimeType, errorLevel, onPr
     const metadata = { n:fileName, y:mimeType || 'application/octet-stream', s:normalized.length, h:contentHash };
     const source = createLazyV2FileSource(await bytesToBase64Async(normalized,onProgress), id, metadata, policy.effectiveLevel);
     return { id:id, hash:contentHash, source:source, policy:policy };
+}
+
+async function buildUniformFileTransfer(bytes, fileName, mimeType, errorLevel) {
+    const normalized = new Uint8Array(bytes);
+    const policy = getFilePolicy(normalized.length, errorLevel);
+    if (!policy.accepted) throw new Error('文件超过20MiB上限');
+    const contentHash = await sha256Hex(normalized);
+    const descriptor = `${fileName}\u0000${normalized.length}\u0000${contentHash}`;
+    const id = (await sha256Hex(utf8Bytes(descriptor))).slice(0, 16);
+    const metadata = { n:fileName, y:mimeType || 'application/octet-stream', s:normalized.length, h:contentHash };
+    const metadataBytes = utf8Bytes(JSON.stringify(metadata));
+    const objectBytes = new Uint8Array(4 + metadataBytes.length + normalized.length);
+    new DataView(objectBytes.buffer).setUint32(0, metadataBytes.length, false);
+    objectBytes.set(metadataBytes, 4);
+    objectBytes.set(normalized, 4 + metadataBytes.length);
+    return { id:id, hash:contentHash, metadata:metadata,
+        source:createUniformV3FileSource(objectBytes, id, policy.effectiveLevel), policy:policy };
 }
 
 // Warning/Error Display Utilities (T006)
@@ -977,8 +1051,8 @@ function getChunkSizes(errorLevel) {
 
 function estimateQRCount(file, forcedLevel) {
     const errorLevel = forcedLevel || document.getElementById('errorLevel').value;
-    const base64Size = Math.ceil(file.size / 3) * 4;
-    const layout = calculateV2Layout('f','0123456789abcdef',base64Size,{n:file.name,y:file.type||'application/octet-stream',s:file.size,h:'0'.repeat(64)},errorLevel);
+    const metadataSize = utf8ByteLength(JSON.stringify({n:file.name,y:file.type||'application/octet-stream',s:file.size,h:'0'.repeat(64)}));
+    const layout = calculateUniformV3Layout(4 + metadataSize + file.size, errorLevel);
     const qrCount = layout.total;
     const selectedSpeed = Number(document.getElementById('loopSpeed').value) || 100;
     const scanTime = Math.max(1, Math.ceil(qrCount * selectedSpeed / 60000));
@@ -1028,9 +1102,10 @@ async function generateFileQR() {
             const bytes = new Uint8Array(e.target.result);
             console.log(`文件读取完成: ${bytes.length} 字节`);
             const status=document.getElementById('fileProcessStatus'),progress=document.getElementById('fileProcessProgress');
-            if(status)status.textContent='正在计算校验并编码...';
-            const transfer = await buildLazyFileTransfer(bytes, currentFile.name, currentFile.type, policy.effectiveLevel,function(ratio){if(progress)progress.value=Math.round(ratio*100);if(status)status.textContent=`正在编码 ${Math.round(ratio*100)}%`;});
-            console.log(`V2 惰性文件源: ${transfer.source.length} 片, ID=${transfer.id}`);
+            if(status)status.textContent='正在计算 SHA-256 并建立均匀分片...';
+            const transfer = await buildUniformFileTransfer(bytes, currentFile.name, currentFile.type, policy.effectiveLevel);
+            if(progress)progress.value=100;
+            console.log(`V3 均匀文件源: ${transfer.source.length} 片, ID=${transfer.id}`);
             generatePrivateQRCodes(transfer.source);
 
         } catch (error) {
@@ -1294,6 +1369,8 @@ if (new URLSearchParams(window.location.search).get('test') === '1') {
         splitPublicText: splitPublicText,
         buildPrivateTextTransfer: buildPrivateTextTransfer,
         buildFileTransfer: buildFileTransfer,
+        buildUniformFileTransfer: buildUniformFileTransfer,
+        calculateUniformV3Layout: calculateUniformV3Layout,
         sha256Hex: sha256Hex,
         getTextModes: function() { return ['universal', 'private']; },
         selectTextMode: setTextProtocolMode,

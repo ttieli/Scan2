@@ -22,15 +22,17 @@ Each QR code carries a chunk of your data. At 10 codes/second (0.1s cycle):
 
 A 50 KB document transfers in under 30 seconds on M level. Not blazing fast, but when you have **zero network**, it's everything.
 
+The separate **Enhanced** mode uses RaptorQ, CRC32C, WebAssembly QR codecs and 1/2/4 QR symbols per display tick. Dual QR is the default; four QR is intended for a large sender screen and should be reduced when recognition becomes unstable. Actual throughput depends on the camera, browser, screen, distance and lighting.
+
 ## Quick Start
 
 ### Online Demo
 **[https://ttieli.github.io/Scan2/](https://ttieli.github.io/Scan2/)**
 
 ### Offline
-1. Download `index.html`, `sender.html`, `receiver.html` — that's the whole app.
-2. Open `sender.html` on the sending device. Pick a file or paste text.
-3. Open `receiver.html` on the receiving device. Point the camera at the QR codes.
+1. Download the two pages for the mode you want: `sender.html` + `receiver.html`, or `sender-fast.html` + `receiver-fast.html`.
+2. Open the sender page on the sending device. Pick a file or paste text.
+3. Open the matching receiver page on the receiving device. Point the camera at the QR codes.
 4. Done. The file is reconstructed and ready to download.
 
 ## Features
@@ -45,6 +47,10 @@ A 50 KB document transfers in under 30 seconds on M level. Not blazing fast, but
 - **Visual Progress Map** — see exactly which fragments have been received and which are missing.
 - **Strong Integrity** — files and private text are verified with SHA-256 before completion; corrupted files cannot be downloaded.
 - **Order Independent** — scanning may start at any fragment. The receiver keeps early data until metadata arrives and rejects fragments from other transfers.
+- **Uniform Classic File Frames** — V3 spreads file metadata across ordinary fixed-size packets, so the first QR has the same payload length and density as the rest.
+- **Enhanced RaptorQ Mode** — fountain-code repair symbols recover missed frames without waiting for specific fragment numbers or replaying an identical round.
+- **Parallel QR Playback** — Enhanced mode supports one, two, or four QR symbols per tick and defaults to two.
+- **Front / Rear Camera** — the Enhanced receiver can explicitly request either camera, including iOS Safari.
 - **Bilingual** — Chinese and English, auto-detected.
 
 ## Transfer Modes
@@ -53,9 +59,13 @@ A 50 KB document transfers in under 30 seconds on M level. Not blazing fast, but
 |---|---|---|---|
 | Text | Public | Any QR scanner | Plain UTF-8 text; long content becomes independently readable numbered QR codes |
 | Text | Private | QR Transfer receiver | Fast V2 sequence scanning, automatic reassembly, recovery, and retransmit |
-| File | Private | QR Transfer receiver | V2 sequence scanning, SHA-256 verification, and download |
+| File | Private | QR Transfer receiver | Uniform V3 sending, V2 receive compatibility, SHA-256 and download |
+| Text | Enhanced | Enhanced receiver | RaptorQ recovery, per-packet CRC32C, final SHA-256 |
+| File | Enhanced | Enhanced receiver | 1/2/4 QR playback, RaptorQ recovery, CRC32C and final SHA-256 |
 
-`sender.html` and `receiver.html` are each fully self-contained. Neither page needs a CDN, an external JavaScript file, a server, or a build step. Private V2 transfers have a stable transfer ID; while one transfer is active, fragments from other transfers are ignored until you choose **Start Over**.
+`sender.html`, `receiver.html`, `sender-fast.html`, and `receiver-fast.html` are each fully self-contained. None of them needs a CDN, external JavaScript/WASM, or a server-side API. The Enhanced pages embed their Workers and WASM codecs directly in the HTML; `fast-mode/` is only the reproducible build source. Camera capture still requires a browser secure context such as HTTPS or localhost.
+
+Classic file sends now use the uniform V3 wire format. The receiver continues to accept existing private V2 transfers.
 
 ### QR Display Size
 
@@ -98,6 +108,9 @@ Sender                              Receiver
 ├── index.html        # Landing page
 ├── sender.html       # QR code generation (with embedded QRCode.js)
 ├── receiver.html     # Camera scanning & reassembly (with embedded jsQR)
+├── sender-fast.html  # Self-contained RaptorQ multi-QR sender
+├── receiver-fast.html # Self-contained multi-QR receiver with camera selection
+├── fast-mode/        # Vendored, pinned build source and licenses
 ├── test.html         # Automated E2E test suite
 └── README.md
 ```
@@ -130,15 +143,17 @@ Sender                              Receiver
 
 一个 50 KB 的文档在 M 级别下不到 30 秒传完。速度不算飞快，但在**没有任何网络**的情况下，这就是一切。
 
+独立的**增强模式**使用 RaptorQ、CRC32C、WebAssembly 二维码编解码器，并支持每次显示 1/2/4 个二维码。默认使用双码；四码适合较大的发送屏幕，识别不稳定时应降为双码或单码。实际速度取决于摄像头、浏览器、屏幕、距离和光线。
+
 ## 快速开始
 
 ### 在线体验
 **[https://ttieli.github.io/Scan2/](https://ttieli.github.io/Scan2/)**
 
 ### 离线使用
-1. 下载 `index.html`、`sender.html`、`receiver.html` — 这就是整个应用。
-2. 在发送设备上打开 `sender.html`，选文件或粘贴文本。
-3. 在接收设备上打开 `receiver.html`，摄像头对准二维码。
+1. 按模式下载对应的两个页面：`sender.html` + `receiver.html`，或 `sender-fast.html` + `receiver-fast.html`。
+2. 在发送页面选择文件或粘贴文本。
+3. 在接收设备上打开对应接收页面，摄像头对准二维码。
 4. 搞定。文件已还原，可以下载。
 
 ## 功能亮点
@@ -153,6 +168,10 @@ Sender                              Receiver
 - **可视化进度** — 实时看到哪些片段已收到、哪些还缺。
 - **强完整性校验** — 文件和私有文本完成前使用 SHA-256 校验；损坏文件不会开放下载。
 - **不依赖扫描顺序** — 可以从任意片开始扫描；元数据晚到不会清空进度，其他传输的片段不会混入当前会话。
+- **经典文件二维码密度均匀** — V3 把文件元数据分散进普通等长分片，第一张与其余二维码的载荷长度和密度一致。
+- **RaptorQ 增强模式** — 通过持续生成修复符号恢复漏扫帧，不再等待某个固定编号或重放完全相同的一轮。
+- **多二维码并行** — 增强模式支持单码、双码和四码，默认双码。
+- **前置 / 后置摄像头** — 增强接收端可以明确选择摄像头，包括 iOS Safari。
 - **中英双语** — 自动检测语言，也可手动切换。
 
 ## 传输模式
@@ -161,9 +180,13 @@ Sender                              Receiver
 |---|---|---|---|
 | 文本 | 公有 | 任意二维码扫描器 | 原始 UTF-8 明文；长内容拆成可独立读取、带序号的二维码 |
 | 文本 | 私有 | QR Transfer 接收端 | V2 快速连续扫描、自动拼接、恢复和补传 |
-| 文件 | 私有 | QR Transfer 接收端 | V2 连续扫描、SHA-256 校验和下载 |
+| 文件 | 私有 | QR Transfer 接收端 | 均匀 V3 发送、兼容接收 V2、SHA-256 校验和下载 |
+| 文本 | 增强 | 增强接收端 | RaptorQ 恢复、逐包 CRC32C、最终 SHA-256 |
+| 文件 | 增强 | 增强接收端 | 1/2/4 码播放、RaptorQ 恢复、CRC32C 和最终 SHA-256 |
 
-`sender.html` 和 `receiver.html` 各自都是完整自包含页面，不需要 CDN、外部 JavaScript、服务器或构建步骤。私有 V2 传输使用稳定传输 ID；当前传输未结束时，其他传输的片段会被忽略，选择“重新开始”后才能切换。
+`sender.html`、`receiver.html`、`sender-fast.html` 和 `receiver-fast.html` 都是完整自包含页面，不需要 CDN、外部 JavaScript/WASM 或服务端接口。增强页面把 Worker 和 WASM 编解码器直接嵌入 HTML；`fast-mode/` 只用于可重复构建。摄像头仍需要 HTTPS 或 localhost 等浏览器安全上下文。
+
+经典文件发送现在默认使用均匀 V3 协议，接收端仍兼容已有的私有 V2 传输。
 
 ### 二维码显示尺寸
 
@@ -205,6 +228,9 @@ Sender                              Receiver
 ├── index.html        # 首页
 ├── sender.html       # 二维码生成（内嵌 QRCode.js）
 ├── receiver.html     # 摄像头扫描与数据还原（内嵌 jsQR）
+├── sender-fast.html  # 自包含 RaptorQ 多二维码发送端
+├── receiver-fast.html # 自包含多码接收端与前后摄像头选择
+├── fast-mode/        # 固定版本的构建源码与许可证
 ├── test.html         # 自动化端到端测试
 └── README.md
 ```
