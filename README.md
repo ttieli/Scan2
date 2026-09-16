@@ -22,7 +22,7 @@ Each QR code carries a chunk of your data. At 10 codes/second (0.1s cycle):
 
 A 50 KB document transfers in under 30 seconds on M level. Not blazing fast, but when you have **zero network**, it's everything.
 
-The separate **Enhanced** mode uses RaptorQ, CRC32C, WebAssembly QR codecs and 1/2/4 QR symbols per display tick. Dual QR is the default; four QR is intended for a large sender screen and should be reduced when recognition becomes unstable. Actual throughput depends on the camera, browser, screen, distance and lighting.
+The separate **Enhanced** mode uses RaptorQ, CRC32C, WebAssembly QR codecs and 1/2/4 QR symbols per display tick. Dual QR and 10 FPS are the defaults; four QR is intended for a large sender screen and should be reduced when recognition becomes unstable. Actual throughput depends on the camera, browser, screen, distance and lighting.
 
 ## Quick Start
 
@@ -147,7 +147,7 @@ Sender                              Receiver
 
 一个 50 KB 的文档在 M 级别下不到 30 秒传完。速度不算飞快，但在**没有任何网络**的情况下，这就是一切。
 
-独立的**增强模式**使用 RaptorQ、CRC32C、WebAssembly 二维码编解码器，并支持每次显示 1/2/4 个二维码。默认使用双码；四码适合较大的发送屏幕，识别不稳定时应降为双码或单码。实际速度取决于摄像头、浏览器、屏幕、距离和光线。
+独立的**增强模式**使用 RaptorQ、CRC32C、WebAssembly 二维码编解码器，并支持每次显示 1/2/4 个二维码。默认使用双码和 10 帧/秒；四码适合较大的发送屏幕，识别不稳定时应降为双码或单码。实际速度取决于摄像头、浏览器、屏幕、距离和光线。
 
 ## 快速开始
 
