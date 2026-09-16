@@ -53,6 +53,7 @@ The separate **Enhanced** mode uses RaptorQ, CRC32C, WebAssembly QR codecs and 1
 - **Front / Rear Camera** — the Enhanced receiver can explicitly request either camera, including iOS Safari.
 - **RaptorQ Progress Map** — Enhanced receiver shows direct source-symbol coverage, repair-symbol count, useful-packet progress and up to 200 visual buckets.
 - **Missing-only Recovery Loop** — copy an `RQ1` request from the Enhanced receiver, paste it into the Enhanced sender, and replay only missing source QR packets.
+- **One Receiver for Both Senders** — Enhanced receiver auto-detects Enhanced RaptorQ, Classic V2 JSON and Classic Q3F file streams without changing either sender.
 - **Bilingual** — Chinese and English, auto-detected.
 
 ## Transfer Modes
@@ -178,6 +179,7 @@ Sender                              Receiver
 - **前置 / 后置摄像头** — 增强接收端可以明确选择摄像头，包括 iOS Safari。
 - **RaptorQ 进度框** — 增强接收端显示源符号覆盖、修复符号数量、有效包进度和最多 200 个可视化进度格。
 - **遗漏二维码定向补扫** — 从增强接收端复制 `RQ1` 请求，粘贴到增强发送端后只循环遗漏的源二维码。
+- **一个接收端兼容两种发送端** — 增强接收端默认自动识别增强 RaptorQ、经典 V2 JSON 和经典 Q3F 文件流，无需修改任一发送端。
 - **中英双语** — 自动检测语言，也可手动切换。
 
 ## 传输模式

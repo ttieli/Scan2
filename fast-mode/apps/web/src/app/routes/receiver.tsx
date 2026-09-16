@@ -272,6 +272,7 @@ export function ReceiverPage() {
   const [recoveryRequest, setRecoveryRequest] = useState('');
   const [recoveryMissingCount, setRecoveryMissingCount] = useState(0);
   const [recoveryCopied, setRecoveryCopied] = useState(false);
+  const [recoveryRequestKind, setRecoveryRequestKind] = useState<'raptorq' | 'classic-numbers'>('raptorq');
   const scanStartRef = useRef<number>(0);
   const dataLengthRef = useRef<number>(0);
   const decodedQrCountRef = useRef(0);
@@ -370,6 +371,7 @@ export function ReceiverPage() {
         case 'recoveryRequest': {
           setRecoveryRequest(msg.code ?? '');
           setRecoveryMissingCount(msg.missingCount ?? 0);
+          setRecoveryRequestKind(msg.requestKind === 'classic-numbers' ? 'classic-numbers' : 'raptorq');
           setRecoveryCopied(false);
           break;
         }
@@ -514,6 +516,7 @@ export function ReceiverPage() {
     setRecoveryRequest('');
     setRecoveryMissingCount(0);
     setRecoveryCopied(false);
+    setRecoveryRequestKind('raptorq');
     setVerifiedSha256('');
     scanStartRef.current = 0;
     dataLengthRef.current = 0;
@@ -607,6 +610,7 @@ export function ReceiverPage() {
     setRecoveryRequest('');
     setRecoveryMissingCount(0);
     setRecoveryCopied(false);
+    setRecoveryRequestKind('raptorq');
     setVerifiedSha256('');
     scanStartRef.current = 0;
     dataLengthRef.current = 0;
@@ -799,6 +803,7 @@ export function ReceiverPage() {
     ? Math.min(99, Math.round(acceptedPackets / neededPackets * 100))
     : 0;
   const missingSourceCount = Math.max(0, sourceTotal - sourceReceived);
+  const classicTransferActive = detectedFecCodec === 'classic-v2' || detectedFecCodec === 'classic-q3f';
 
   // ── Render ────────────────────────────────────────────────────────────────────────────
   return (
@@ -1198,16 +1203,16 @@ export function ReceiverPage() {
       {sourceTotal > 0 && (
         <div style={S.section}>
           <div style={{ ...S.row, justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <div style={S.label}>RaptorQ Progress</div>
+            <div style={S.label}>{classicTransferActive ? 'Classic Transfer Progress' : 'RaptorQ Progress'}</div>
             <span style={S.statValue}>{decodeProgressPercent}% · {acceptedPackets}/{neededPackets || '?'}</span>
           </div>
           <div style={{ height: 10, overflow: 'hidden', borderRadius: 999, background: '#21262d', marginBottom: 10 }}>
             <div style={{ width: `${decodeProgressPercent}%`, height: '100%', background: '#3fb950', transition: 'width 0.2s' }} />
           </div>
           <div style={{ ...S.statsBar, marginTop: 0, marginBottom: 10 }}>
-            <span>source <span style={S.statValue}>{sourceReceived}/{sourceTotal}</span></span>
-            <span>repair <span style={S.statValue}>{repairReceived}</span></span>
-            <span>direct missing <span style={S.statValue}>{missingSourceCount}</span></span>
+            <span>{classicTransferActive ? 'fragments' : 'source'} <span style={S.statValue}>{sourceReceived}/{sourceTotal}</span></span>
+            {!classicTransferActive && <span>repair <span style={S.statValue}>{repairReceived}</span></span>}
+            <span>missing <span style={S.statValue}>{missingSourceCount}</span></span>
           </div>
           <div
             aria-label="RaptorQ source packet progress map"
@@ -1244,7 +1249,7 @@ export function ReceiverPage() {
               disabled={!scanning || missingSourceCount === 0}
               onClick={handleGenerateRecoveryRequest}
             >
-              Generate missing-only recovery request
+              {classicTransferActive ? 'Show missing fragment numbers' : 'Generate missing-only recovery request'}
             </button>
             {missingSourceCount === 0 && <span style={{ color: '#3fb950', fontSize: 13 }}>All source QR packets received ✓</span>}
           </div>
@@ -1252,7 +1257,7 @@ export function ReceiverPage() {
             <div style={{ marginTop: 12 }}>
               <div style={{ ...S.row, justifyContent: 'space-between', marginBottom: 6 }}>
                 <span style={{ color: '#d29922', fontSize: 13 }}>
-                  Missing {recoveryMissingCount} source QR packets
+                  Missing {recoveryMissingCount} {recoveryRequestKind === 'classic-numbers' ? 'classic fragments' : 'source QR packets'}
                 </span>
                 <button type="button" style={S.btnSecondary} onClick={handleCopyRecoveryRequest}>
                   {recoveryCopied ? 'Copied ✓' : 'Copy request'}
@@ -1265,7 +1270,9 @@ export function ReceiverPage() {
                 readOnly
               />
               <p style={{ marginTop: 6, color: '#8b949e', fontSize: 12 }}>
-                Paste this request into the Enhanced Sender and start the same file again. Only missing source QR packets will loop.
+                {recoveryRequestKind === 'classic-numbers'
+                  ? 'Paste these numbers into the Classic Sender fragment-number box to loop only the missing fragments.'
+                  : 'Paste this request into the Enhanced Sender and start the same file again. Only missing source QR packets will loop.'}
               </p>
             </div>
           )}
@@ -1386,6 +1393,8 @@ function formatDetectedQR(version: number, symbolSize: number): string {
 }
 
 function formatDetectedFecCodec(value: string): string {
+  if (value === 'classic-v2') return 'Classic V2';
+  if (value === 'classic-q3f') return 'Classic Q3F';
   if (value === 'wasm-raptorq' || value === 'js-rlnc') {
     return formatFecCodec(value);
   }

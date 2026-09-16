@@ -11375,6 +11375,7 @@ async function testFastStandaloneArtifacts(id) {
         requireCondition(senderHtml.length > 1000000 && receiverHtml.length > 1000000, 'WASM/Worker 未内嵌到增强页面');
         requireCondition(receiverHtml.includes('RaptorQ Progress') && receiverHtml.includes('Generate missing-only recovery request'), '增强接收端缺少进度框或补扫请求入口');
         requireCondition(senderHtml.includes('Missing-only recovery request'), '增强发送端缺少定向补扫输入');
+        requireCondition(receiverHtml.includes('Classic Transfer Progress') && receiverHtml.includes('Classic V2') && receiverHtml.includes('Classic Q3F'), '增强接收端缺少经典发送端兼容路径');
     });
 }
 

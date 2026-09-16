@@ -34,6 +34,7 @@ import {
   raptorQSourceOrdinal,
   sourceLayoutForRaptorQ,
 } from '@raptorqr/core/fec/raptorq_recovery';
+import { ClassicTransferReceiver, type ClassicCompleteResult } from '@/lib/classic_transfer_receiver';
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,10 @@ let decodeSettings: QrDecodeSettings = DEFAULT_DECODE_SETTINGS;
 let receiverFecCodec: ReceiverFecCodec = DEFAULT_RECEIVER_FEC_CODEC;
 let codecMismatchReported = false;
 let raptorqUnavailableReported = false;
+let activeProtocol: 'enhanced' | 'classic' | null = null;
+let classicReceiver = new ClassicTransferReceiver();
+let classicDecodedCount = 0;
+let classicCompleted = false;
 
 // ─── Worker handler ───────────────────────────────────────────────────────────
 
@@ -100,6 +105,10 @@ self.onmessage = (e: MessageEvent) => {
     frameQueue = [];
     codecMismatchReported = false;
     raptorqUnavailableReported = false;
+    activeProtocol = null;
+    classicReceiver = new ClassicTransferReceiver();
+    classicDecodedCount = 0;
+    classicCompleted = false;
     return;
   }
 
@@ -110,6 +119,10 @@ self.onmessage = (e: MessageEvent) => {
   }
 
   if (msg.type === 'recoveryRequest') {
+    if (activeProtocol === 'classic' && classicReceiver.snapshot()) {
+      self.postMessage({ type:'recoveryRequest', ...classicReceiver.recoveryRequest() });
+      return;
+    }
     if (!current || current.codec !== 'wasm-raptorq') {
       self.postMessage({ type: 'error', message: 'Scan a RaptorQ transfer before generating a recovery request.' });
       return;
@@ -176,7 +189,7 @@ async function processFrameQueue(): Promise<void> {
       const queued = frameQueue.shift()!;
       try {
         await handleFrame(queued.imageData);
-        if (current?.completed) {
+        if (current?.completed || classicCompleted) {
           frameQueue = [];
         }
       } catch (err: any) {
@@ -201,7 +214,13 @@ async function handleFrame(imageData: ImageData): Promise<void> {
     try {
       packet = parsePacket(decoded.bytes);
     } catch {
-      self.postMessage({ type: 'rejected', reason: 'CRC32C or transport header mismatch' });
+      const classicProcessed = await processClassicDecoded(decoded);
+      if (classicProcessed) {
+        processedPackets++;
+        if (classicCompleted) return;
+      } else {
+        self.postMessage({ type: 'rejected', reason: 'CRC32C, classic V2, or Q3F format mismatch' });
+      }
       continue;
     }
 
@@ -232,6 +251,11 @@ async function processDecodedPacket(
   packet: Packet,
   countFrame: boolean,
 ): Promise<boolean> {
+  if (activeProtocol === 'classic') {
+    self.postMessage({ type:'error', message:'A classic transfer is active. Restart before scanning an Enhanced RaptorQ transfer.' });
+    return false;
+  }
+  activeProtocol = 'enhanced';
   const codec = packetCodec(packet.header);
   if (!codecAllowed(codec)) {
     reportCodecMismatch(codec);
@@ -243,6 +267,71 @@ async function processDecodedPacket(
   }
 
   return processRlncPacket(decoded, packet, countFrame);
+}
+
+async function processClassicDecoded(decoded: QrDecodeResult): Promise<boolean> {
+  if (activeProtocol === 'enhanced') {
+    self.postMessage({ type:'error', message:'An Enhanced RaptorQ transfer is active. Restart before scanning a classic transfer.' });
+    return false;
+  }
+  let text: string;
+  try { text = new TextDecoder('utf-8',{fatal:true}).decode(decoded.bytes); }
+  catch { return false; }
+  try {
+    const result = await classicReceiver.accept(text);
+    if (result.type === 'unsupported') {
+      if (!isLikelyPublicText(text)) return false;
+      activeProtocol = 'classic';
+      classicCompleted = true;
+      self.postMessage({type:'complete',isText:true,text:text.replace(/^\uFEFF/,''),sha256:'',protocol:'public-text',autoStop:true});
+      return true;
+    }
+    activeProtocol = 'classic';
+    classicDecodedCount++;
+    reportClassicProgress(result.snapshot, result.type === 'progress' && result.duplicate);
+    if (result.type === 'complete') {
+      classicCompleted = true;
+      postClassicComplete(result);
+    }
+    return true;
+  } catch (error: any) {
+    self.postMessage({type:'error',message:`Classic transfer error: ${error.message ?? String(error)}`});
+    return true;
+  }
+}
+
+function isLikelyPublicText(value: string): boolean {
+  if (!value) return false;
+  for (const character of value) {
+    const code = character.codePointAt(0)!;
+    if ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || (code >= 0x7f && code <= 0x9f)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function reportClassicProgress(snapshot: NonNullable<ReturnType<ClassicTransferReceiver['snapshot']>>, duplicate: boolean): void {
+  self.postMessage({
+    type:'progress',protocol:snapshot.protocol,totalFrames:classicDecodedCount,framesWithQR:classicDecodedCount,
+    uniquePackets:snapshot.received,duplicatePackets:Math.max(0,classicDecodedCount-snapshot.received),
+    acceptedPackets:snapshot.received,neededPackets:snapshot.total,receivedPackets:snapshot.received,
+    solvedGenerations:0,totalGenerations:snapshot.total,sourceGenerations:snapshot.total,
+    dataLength:0,symbolSize:0,qrVersion:0,fecCodec:snapshot.protocol,
+    sourceTotal:snapshot.total,sourceReceived:snapshot.received,repairReceived:0,sourceBuckets:snapshot.buckets,
+    status:`Receiving ${snapshot.protocol === 'classic-v2' ? 'Classic V2' : 'Classic Q3F'} (${snapshot.received}/${snapshot.total})${duplicate ? ' · duplicate' : ''}`,
+  });
+}
+
+function postClassicComplete(result: ClassicCompleteResult): void {
+  if (result.isText) {
+    self.postMessage({type:'complete',isText:true,text:result.text ?? '',sha256:result.sha256,protocol:result.protocol,autoStop:true});
+    return;
+  }
+  const output=result.data!;
+  self.postMessage({type:'complete',isText:false,data:output.buffer,filename:result.filename ?? 'recovered-file',
+    mime:result.mime ?? 'application/octet-stream',sha256:result.sha256,protocol:result.protocol,autoStop:true},
+    {transfer:[output.buffer as ArrayBuffer]});
 }
 
 function processRlncPacket(
